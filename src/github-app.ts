@@ -1,6 +1,12 @@
 import { createPrivateKey, sign } from "node:crypto";
-import { GitIngestionError, type GitPushEvent } from "./index";
-import { verifyGitHubPushWebhook } from "./github";
+import {
+  GitIngestionError,
+  parseGitPullRequestEvent,
+  parseGitRepository,
+  type GitPullRequestEvent,
+  type GitPushEvent,
+} from "./index";
+import { verifyGitHubPushWebhook, verifyGitHubWebhookEnvelope } from "./github";
 
 const API_VERSION = "2022-11-28";
 const JWT_LIFETIME_SECONDS = 9 * 60;
@@ -268,5 +274,74 @@ export const verifyGitHubAppPushWebhook = (options: {
     event,
     installationId: integer(installation.id, "GitHub installation id"),
     repositoryId: integer(repository.id, "GitHub repository id"),
+  };
+};
+
+export const verifyGitHubAppPullRequestWebhook = (options: {
+  body: string | Uint8Array;
+  headers: HeaderSource;
+  now?: () => Date;
+  secret: string;
+}): {
+  event: GitPullRequestEvent;
+  installationId: number;
+  repositoryId: number;
+} => {
+  const { deliveryId, payload, receivedAt } = verifyGitHubWebhookEnvelope(
+    options,
+    "pull_request",
+  );
+  const action = string(payload.action, "GitHub pull request action");
+  if (!["opened", "reopened", "synchronize", "closed"].includes(action))
+    throw new GitIngestionError("GitHub pull request action is unsupported");
+  const installation = object(payload.installation, "GitHub App installation");
+  const repositoryPayload = object(payload.repository, "GitHub repository");
+  const pullRequest = object(payload.pull_request, "GitHub pull request");
+  const base = object(pullRequest.base, "GitHub pull request base");
+  const head = object(pullRequest.head, "GitHub pull request head");
+  const baseRepositoryPayload = object(
+    base.repo,
+    "GitHub pull request base repository",
+  );
+  const headRepositoryPayload = object(
+    head.repo,
+    "GitHub pull request head repository",
+  );
+  const author = object(pullRequest.user, "GitHub pull request author");
+  const repositoryFor = (value: Record<string, unknown>) =>
+    parseGitRepository({
+      cloneUrl: string(value.clone_url, "GitHub repository clone URL"),
+      ...(typeof value.default_branch === "string"
+        ? { defaultBranch: value.default_branch }
+        : {}),
+      fullName: string(value.full_name, "GitHub repository full name"),
+      provider: "github",
+      webUrl: string(value.html_url, "GitHub repository web URL"),
+    });
+  const revisionFor = (
+    value: Record<string, unknown>,
+    repository: ReturnType<typeof repositoryFor>,
+  ) => ({
+    commitSha: string(value.sha, "GitHub pull request revision").toLowerCase(),
+    ref: `refs/heads/${string(value.ref, "GitHub pull request ref")}`,
+    repository,
+  });
+
+  return {
+    event: parseGitPullRequestEvent({
+      action,
+      author: { login: string(author.login, "GitHub pull request author") },
+      base: revisionFor(base, repositoryFor(baseRepositoryPayload)),
+      deliveryId,
+      draft: pullRequest.draft === true,
+      head: revisionFor(head, repositoryFor(headRepositoryPayload)),
+      merged: pullRequest.merged === true,
+      number: integer(payload.number, "GitHub pull request number"),
+      receivedAt,
+      title: string(pullRequest.title, "GitHub pull request title"),
+      webUrl: string(pullRequest.html_url, "GitHub pull request URL"),
+    }),
+    installationId: integer(installation.id, "GitHub installation id"),
+    repositoryId: integer(repositoryPayload.id, "GitHub repository id"),
   };
 };

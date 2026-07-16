@@ -7,6 +7,13 @@ import {
 
 type HeaderSource = Headers | Record<string, string | undefined>;
 
+type GitHubWebhookOptions = {
+  body: string | Uint8Array;
+  headers: HeaderSource;
+  now?: () => Date;
+  secret: string;
+};
+
 const header = (headers: HeaderSource, name: string) => {
   if (headers instanceof Headers) return headers.get(name);
   const match = Object.entries(headers).find(
@@ -49,17 +56,14 @@ const string = (value: unknown, label: string) => {
   return value;
 };
 
-export const verifyGitHubPushWebhook = (options: {
-  body: string | Uint8Array;
-  headers: HeaderSource;
-  now?: () => Date;
-  secret: string;
-}): GitPushEvent => {
+export const verifyGitHubWebhookEnvelope = (
+  options: GitHubWebhookOptions,
+  eventName: string,
+) => {
   if (options.secret.length < 16)
     throw new GitIngestionError("GitHub webhook secret is too short");
-  const eventName = header(options.headers, "x-github-event");
-  if (eventName !== "push")
-    throw new GitIngestionError("GitHub webhook is not a push event");
+  if (header(options.headers, "x-github-event") !== eventName)
+    throw new GitIngestionError(`GitHub webhook is not a ${eventName} event`);
   const deliveryId = header(options.headers, "x-github-delivery");
   if (!deliveryId)
     throw new GitIngestionError("GitHub webhook delivery id is missing");
@@ -68,13 +72,27 @@ export const verifyGitHubPushWebhook = (options: {
   if (!signature || !verifySignature(bytes, signature, options.secret))
     throw new GitIngestionError("GitHub webhook signature is invalid");
 
-  let decoded: unknown;
+  let payload: unknown;
   try {
-    decoded = JSON.parse(new TextDecoder().decode(bytes));
+    payload = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     throw new GitIngestionError("GitHub webhook body is invalid JSON");
   }
-  const payload = object(decoded, "GitHub push payload");
+
+  return {
+    deliveryId,
+    payload: object(payload, `GitHub ${eventName} payload`),
+    receivedAt: (options.now ?? (() => new Date()))().toISOString(),
+  };
+};
+
+export const verifyGitHubPushWebhook = (
+  options: GitHubWebhookOptions,
+): GitPushEvent => {
+  const { deliveryId, payload, receivedAt } = verifyGitHubWebhookEnvelope(
+    options,
+    "push",
+  );
   const repository = object(payload.repository, "GitHub repository");
   const pusher = object(payload.pusher, "GitHub pusher");
   const fullName = string(repository.full_name, "GitHub repository full name");
@@ -98,7 +116,7 @@ export const verifyGitHubPushWebhook = (options: {
       ...(typeof pusher.email === "string" ? { email: pusher.email } : {}),
       name: string(pusher.name, "GitHub pusher name"),
     },
-    receivedAt: (options.now ?? (() => new Date()))().toISOString(),
+    receivedAt,
     revision: {
       commitSha: after,
       ref,

@@ -7,6 +7,7 @@ import {
   listGitHubAppInstallationsForUser,
   listGitHubAppRepositories,
   listGitHubAppRepositoriesForUser,
+  verifyGitHubAppPullRequestWebhook,
   verifyGitHubAppPushWebhook,
 } from "../src/github-app";
 
@@ -154,5 +155,69 @@ describe("GitHub App authentication", () => {
     });
     expect(result.installationId).toBe(3);
     expect(result.repositoryId).toBe(4);
+  });
+
+  test("normalizes an authenticated pull request lifecycle event", () => {
+    const repository = {
+      clone_url: "https://github.com/absolutejs/git.git",
+      default_branch: "main",
+      full_name: "absolutejs/git",
+      html_url: "https://github.com/absolutejs/git",
+      id: 4,
+    };
+    const body = JSON.stringify({
+      action: "synchronize",
+      installation: { id: 3 },
+      number: 42,
+      pull_request: {
+        base: { ref: "main", repo: repository, sha: "b".repeat(40) },
+        draft: false,
+        head: { ref: "feature", repo: repository, sha: "a".repeat(40) },
+        html_url: "https://github.com/absolutejs/git/pull/42",
+        merged: false,
+        title: "Add durable previews",
+        user: { login: "octocat" },
+      },
+      repository,
+    });
+    const secret = "a-secure-webhook-secret";
+    const signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+    const result = verifyGitHubAppPullRequestWebhook({
+      body,
+      headers: {
+        "x-github-delivery": "pr-delivery",
+        "x-github-event": "pull_request",
+        "x-hub-signature-256": signature,
+      },
+      now: () => new Date("2026-07-16T18:00:00.000Z"),
+      secret,
+    });
+    expect(result.installationId).toBe(3);
+    expect(result.repositoryId).toBe(4);
+    expect(result.event).toMatchObject({
+      action: "synchronize",
+      deliveryId: "pr-delivery",
+      number: 42,
+      receivedAt: "2026-07-16T18:00:00.000Z",
+    });
+    expect(result.event.head.commitSha).toBe("a".repeat(40));
+    expect(result.event.head.ref).toBe("refs/heads/feature");
+  });
+
+  test("rejects unsupported pull request actions", () => {
+    const body = JSON.stringify({ action: "labeled" });
+    const secret = "a-secure-webhook-secret";
+    const signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+    expect(() =>
+      verifyGitHubAppPullRequestWebhook({
+        body,
+        headers: {
+          "x-github-delivery": "pr-delivery",
+          "x-github-event": "pull_request",
+          "x-hub-signature-256": signature,
+        },
+        secret,
+      }),
+    ).toThrow("action is unsupported");
   });
 });

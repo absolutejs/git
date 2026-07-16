@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/git",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Provider-neutral authenticated Git source ingestion, webhook normalization, exact-revision materialization, and provenance for Bun and AbsoluteJS.",
   "repository": {
     "type": "git",

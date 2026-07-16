@@ -49,6 +49,27 @@ export const GitPushEventSchema = Type.Object({
   revision: GitRevisionSchema,
 });
 
+export const GitPullRequestEventSchema = Type.Object({
+  action: Type.Union([
+    Type.Literal("opened"),
+    Type.Literal("reopened"),
+    Type.Literal("synchronize"),
+    Type.Literal("closed"),
+  ]),
+  author: Type.Object({
+    login: Type.String({ maxLength: 255, minLength: 1 }),
+  }),
+  base: GitRevisionSchema,
+  deliveryId: Type.String({ maxLength: 255, minLength: 1 }),
+  draft: Type.Boolean(),
+  head: GitRevisionSchema,
+  merged: Type.Boolean(),
+  number: Type.Integer({ minimum: 1 }),
+  receivedAt: IsoTimestampSchema,
+  title: Type.String({ maxLength: 512, minLength: 1 }),
+  webUrl: HttpsUrlSchema,
+});
+
 export const GitProvenanceSchema = Type.Object({
   commitSha: CommitShaSchema,
   deliveryId: Type.String({ maxLength: 255, minLength: 1 }),
@@ -61,6 +82,7 @@ export const GitProvenanceSchema = Type.Object({
 export type GitRepository = Static<typeof GitRepositorySchema>;
 export type GitRevision = Static<typeof GitRevisionSchema>;
 export type GitPushEvent = Static<typeof GitPushEventSchema>;
+export type GitPullRequestEvent = Static<typeof GitPullRequestEventSchema>;
 export type GitProvenance = Static<typeof GitProvenanceSchema>;
 
 export class GitIngestionError extends Error {}
@@ -86,6 +108,9 @@ export const parseGitRevision = (value: unknown): GitRevision =>
 
 export const parseGitPushEvent = (value: unknown): GitPushEvent =>
   decode(GitPushEventSchema, value, "Git push event");
+
+export const parseGitPullRequestEvent = (value: unknown): GitPullRequestEvent =>
+  decode(GitPullRequestEventSchema, value, "Git pull request event");
 
 export type GitAuthorizationPolicy = {
   allowedRefs?: readonly string[];
