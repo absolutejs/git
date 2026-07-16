@@ -3,10 +3,12 @@ import { describe, expect, test } from "bun:test";
 import {
   createGitHubAppInstallationToken,
   createGitHubAppJwt,
+  createGitHubCheckRun,
   getGitHubAppInstallation,
   listGitHubAppInstallationsForUser,
   listGitHubAppRepositories,
   listGitHubAppRepositoriesForUser,
+  updateGitHubCheckRun,
   verifyGitHubAppPullRequestWebhook,
   verifyGitHubAppPushWebhook,
 } from "../src/github-app";
@@ -17,6 +19,85 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", {
 const pem = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
 
 describe("GitHub App authentication", () => {
+  test("creates and completes one installation-authenticated check run", async () => {
+    const requests: Array<{ body: unknown; method: string; url: string }> = [];
+    const responses = [
+      {
+        conclusion: null,
+        html_url: "https://github.com/absolutejs/git/runs/9",
+        id: 9,
+        status: "in_progress",
+      },
+      {
+        conclusion: "success",
+        html_url: "https://github.com/absolutejs/git/runs/9",
+        id: 9,
+        status: "completed",
+      },
+    ];
+    const mockFetch = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      requests.push({
+        body: JSON.parse(String(init?.body)),
+        method: init?.method ?? "GET",
+        url: String(input),
+      });
+      return new Response(JSON.stringify(responses.shift()), { status: 200 });
+    };
+    const created = await createGitHubCheckRun({
+      detailsUrl: "https://paas.example/projects/1",
+      externalId: "delivery:opened",
+      fetch: mockFetch,
+      headSha: "a".repeat(40),
+      installationToken: "ghs_token",
+      name: "AbsoluteJS preview",
+      output: { summary: "Provisioning", title: "Preview deployment" },
+      repositoryFullName: "absolutejs/git",
+      status: "in_progress",
+    });
+    const completed = await updateGitHubCheckRun({
+      checkRunId: created.id,
+      conclusion: "success",
+      detailsUrl: "https://preview.example",
+      externalId: "delivery:success",
+      fetch: mockFetch,
+      installationToken: "ghs_token",
+      name: "AbsoluteJS preview",
+      output: { summary: "Ready", title: "Preview deployment" },
+      repositoryFullName: "absolutejs/git",
+      status: "completed",
+    });
+
+    expect(completed.conclusion).toBe("success");
+    expect(requests).toMatchObject([
+      {
+        body: { head_sha: "a".repeat(40), status: "in_progress" },
+        method: "POST",
+        url: "https://api.github.com/repos/absolutejs/git/check-runs",
+      },
+      {
+        body: { conclusion: "success", status: "completed" },
+        method: "PATCH",
+        url: "https://api.github.com/repos/absolutejs/git/check-runs/9",
+      },
+    ]);
+  });
+
+  test("rejects an invalid check run lifecycle before provider I/O", async () => {
+    await expect(
+      createGitHubCheckRun({
+        fetch: async () => new Response(),
+        headSha: "a".repeat(40),
+        installationToken: "ghs_token",
+        name: "AbsoluteJS preview",
+        repositoryFullName: "absolutejs/git",
+        status: "completed",
+      }),
+    ).rejects.toThrow("needs a conclusion");
+  });
+
   test("creates a bounded RS256 app JWT", () => {
     const jwt = createGitHubAppJwt({
       appId: 123,

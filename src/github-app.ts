@@ -38,6 +38,31 @@ export type GitHubAppInstallationToken = {
   token: string;
 };
 
+export type GitHubCheckRunConclusion =
+  | "action_required"
+  | "cancelled"
+  | "failure"
+  | "neutral"
+  | "skipped"
+  | "stale"
+  | "success"
+  | "timed_out";
+
+export type GitHubCheckRunStatus = "completed" | "in_progress" | "queued";
+
+export type GitHubCheckRunOutput = {
+  summary: string;
+  text?: string;
+  title: string;
+};
+
+export type GitHubCheckRun = {
+  conclusion: GitHubCheckRunConclusion | null;
+  htmlUrl: string;
+  id: number;
+  status: GitHubCheckRunStatus;
+};
+
 const base64url = (value: string | Uint8Array) =>
   Buffer.from(value).toString("base64url");
 
@@ -76,6 +101,123 @@ const githubHeaders = (token: string) => ({
   authorization: `Bearer ${token}`,
   "x-github-api-version": API_VERSION,
 });
+
+const repositoryPath = (fullName: string) => {
+  const parts = fullName.split("/");
+  if (
+    parts.length !== 2 ||
+    parts.some((part) => !/^[A-Za-z0-9_.-]+$/.test(part))
+  )
+    throw new GitIngestionError("GitHub repository full name is invalid");
+  return parts.map(encodeURIComponent).join("/");
+};
+
+const parseCheckRun = (value: unknown): GitHubCheckRun => {
+  const payload = object(value, "GitHub check run");
+  const status = string(payload.status, "GitHub check run status");
+  if (!["completed", "in_progress", "queued"].includes(status))
+    throw new GitIngestionError("GitHub check run status is invalid");
+  const conclusion = payload.conclusion;
+  const conclusions = [
+    "action_required",
+    "cancelled",
+    "failure",
+    "neutral",
+    "skipped",
+    "stale",
+    "success",
+    "timed_out",
+  ];
+  if (conclusion !== null && !conclusions.includes(conclusion as string))
+    throw new GitIngestionError("GitHub check run conclusion is invalid");
+  return {
+    conclusion: conclusion as GitHubCheckRunConclusion | null,
+    htmlUrl: string(payload.html_url, "GitHub check run URL"),
+    id: integer(payload.id, "GitHub check run id"),
+    status: status as GitHubCheckRunStatus,
+  };
+};
+
+const checkRunBody = (input: {
+  conclusion?: GitHubCheckRunConclusion;
+  detailsUrl?: string;
+  externalId?: string;
+  name: string;
+  output?: GitHubCheckRunOutput;
+  status: GitHubCheckRunStatus;
+}) => {
+  if (input.status === "completed" && !input.conclusion)
+    throw new GitIngestionError(
+      "A completed GitHub check run needs a conclusion",
+    );
+  if (input.status !== "completed" && input.conclusion)
+    throw new GitIngestionError(
+      "An incomplete GitHub check run cannot have a conclusion",
+    );
+  return {
+    ...(input.conclusion ? { conclusion: input.conclusion } : {}),
+    ...(input.detailsUrl ? { details_url: input.detailsUrl } : {}),
+    ...(input.externalId ? { external_id: input.externalId } : {}),
+    name: input.name,
+    ...(input.output ? { output: input.output } : {}),
+    status: input.status,
+  };
+};
+
+export const createGitHubCheckRun = async (options: {
+  conclusion?: GitHubCheckRunConclusion;
+  detailsUrl?: string;
+  externalId?: string;
+  fetch?: Fetch;
+  headSha: string;
+  installationToken: string;
+  name: string;
+  output?: GitHubCheckRunOutput;
+  repositoryFullName: string;
+  status: GitHubCheckRunStatus;
+}): Promise<GitHubCheckRun> => {
+  const response = await (options.fetch ?? fetch)(
+    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/check-runs`,
+    {
+      body: JSON.stringify({
+        ...checkRunBody(options),
+        head_sha: options.headSha,
+      }),
+      headers: {
+        ...githubHeaders(options.installationToken),
+        "content-type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+  return parseCheckRun(await json(response, "GitHub check run creation"));
+};
+
+export const updateGitHubCheckRun = async (options: {
+  checkRunId: number;
+  conclusion?: GitHubCheckRunConclusion;
+  detailsUrl?: string;
+  externalId?: string;
+  fetch?: Fetch;
+  installationToken: string;
+  name: string;
+  output?: GitHubCheckRunOutput;
+  repositoryFullName: string;
+  status: GitHubCheckRunStatus;
+}): Promise<GitHubCheckRun> => {
+  const response = await (options.fetch ?? fetch)(
+    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/check-runs/${integer(options.checkRunId, "GitHub check run id")}`,
+    {
+      body: JSON.stringify(checkRunBody(options)),
+      headers: {
+        ...githubHeaders(options.installationToken),
+        "content-type": "application/json",
+      },
+      method: "PATCH",
+    },
+  );
+  return parseCheckRun(await json(response, "GitHub check run update"));
+};
 
 export const createGitHubAppJwt = (options: {
   appId: string | number;

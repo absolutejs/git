@@ -6,6 +6,9 @@ The package turns a signed provider webhook into a normalized, authorized exact
 revision, checks that revision out without a shell, strips Git metadata, applies
 source-size and file-count limits, and emits portable provenance. It does not
 own credentials, databases, queues, build sandboxes, deployment, or UI.
+GitHub App installations can also create and update normalized Check Runs so a
+control plane reports exact-revision deployment posture without hand-writing
+provider payloads.
 
 ```ts
 import { assertGitRevisionAuthorized, gitProvenanceFor } from "@absolutejs/git";
