@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/git",
-  "version": "0.1.0",
+	"version": "0.1.1",
   "description": "Provider-neutral authenticated Git source ingestion, webhook normalization, exact-revision materialization, and provenance for Bun and AbsoluteJS.",
   "repository": {
     "type": "git",
@@ -67,7 +67,7 @@
     "deployment"
   ],
   "dependencies": {
-    "@absolutejs/manifest": "^0.1.0",
+    "@absolutejs/manifest": "0.3.0",
     "@sinclair/typebox": "^0.34.0"
   },
   "devDependencies": {
