@@ -182,6 +182,68 @@ export const listGitHubAppRepositories = async (options: {
   });
 };
 
+export const listGitHubAppInstallationsForUser = async (options: {
+  fetch?: Fetch;
+  userAccessToken: string;
+}): Promise<GitHubAppInstallation[]> => {
+  const response = await (options.fetch ?? fetch)(
+    "https://api.github.com/user/installations?per_page=100",
+    { headers: githubHeaders(options.userAccessToken) },
+  );
+  const payload = object(
+    await json(response, "GitHub user installation listing"),
+    "GitHub user installation list",
+  );
+  if (!Array.isArray(payload.installations))
+    throw new GitIngestionError("GitHub user installation list is invalid");
+  return payload.installations.map((value) => {
+    const installation = object(value, "GitHub installation");
+    const account = object(installation.account, "GitHub installation account");
+    const selection = string(
+      installation.repository_selection,
+      "GitHub repository selection",
+    );
+    if (selection !== "all" && selection !== "selected")
+      throw new GitIngestionError("GitHub repository selection is invalid");
+    return {
+      account: {
+        id: integer(account.id, "GitHub account id"),
+        login: string(account.login, "GitHub account login"),
+      },
+      id: integer(installation.id, "GitHub installation id"),
+      repositorySelection: selection,
+    };
+  });
+};
+
+export const listGitHubAppRepositoriesForUser = async (options: {
+  fetch?: Fetch;
+  installationId: number;
+  userAccessToken: string;
+}): Promise<GitHubAppRepository[]> => {
+  const response = await (options.fetch ?? fetch)(
+    `https://api.github.com/user/installations/${options.installationId}/repositories?per_page=100`,
+    { headers: githubHeaders(options.userAccessToken) },
+  );
+  const payload = object(
+    await json(response, "GitHub user repository listing"),
+    "GitHub user repository list",
+  );
+  if (!Array.isArray(payload.repositories))
+    throw new GitIngestionError("GitHub user repository list is invalid");
+  return payload.repositories.map((value) => {
+    const repository = object(value, "GitHub repository");
+    return {
+      cloneUrl: string(repository.clone_url, "GitHub repository clone URL"),
+      defaultBranch: string(repository.default_branch, "GitHub default branch"),
+      fullName: string(repository.full_name, "GitHub repository full name"),
+      id: integer(repository.id, "GitHub repository id"),
+      private: repository.private === true,
+      webUrl: string(repository.html_url, "GitHub repository web URL"),
+    };
+  });
+};
+
 export const verifyGitHubAppPushWebhook = (options: {
   body: string | Uint8Array;
   headers: HeaderSource;

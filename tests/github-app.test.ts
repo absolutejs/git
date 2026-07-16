@@ -4,7 +4,9 @@ import {
   createGitHubAppInstallationToken,
   createGitHubAppJwt,
   getGitHubAppInstallation,
+  listGitHubAppInstallationsForUser,
   listGitHubAppRepositories,
+  listGitHubAppRepositoriesForUser,
   verifyGitHubAppPushWebhook,
 } from "../src/github-app";
 
@@ -86,6 +88,42 @@ describe("GitHub App authentication", () => {
         })
       )[0]?.fullName,
     ).toBe("absolutejs/git");
+  });
+
+  test("discovers only installations and repositories visible to a user", async () => {
+    const repository = {
+      clone_url: "https://github.com/absolutejs/git.git",
+      default_branch: "main",
+      full_name: "absolutejs/git",
+      html_url: "https://github.com/absolutejs/git",
+      id: 4,
+      private: false,
+    };
+    const responses = [
+      {
+        installations: [
+          {
+            account: { id: 2, login: "absolutejs" },
+            id: 3,
+            repository_selection: "selected",
+          },
+        ],
+      },
+      { repositories: [repository] },
+    ];
+    const mockFetch = async () =>
+      new Response(JSON.stringify(responses.shift()), { status: 200 });
+    const installations = await listGitHubAppInstallationsForUser({
+      fetch: mockFetch,
+      userAccessToken: "ghu_token",
+    });
+    const repositories = await listGitHubAppRepositoriesForUser({
+      fetch: mockFetch,
+      installationId: installations[0]!.id,
+      userAccessToken: "ghu_token",
+    });
+    expect(installations[0]?.account.login).toBe("absolutejs");
+    expect(repositories[0]?.fullName).toBe("absolutejs/git");
   });
 
   test("binds App push events to installation and repository ids", () => {
