@@ -1,11 +1,6 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 
-const IdentifierSchema = Type.String({
-  maxLength: 100,
-  minLength: 1,
-  pattern: "^[A-Za-z0-9_.-]+$",
-});
 const CommitShaSchema = Type.String({ pattern: "^[a-f0-9]{40,64}$" });
 const HttpsUrlSchema = Type.String({
   maxLength: 2048,
@@ -17,7 +12,7 @@ const IsoTimestampSchema = Type.String({
 
 export const GitRepositorySchema = Type.Object({
   cloneUrl: HttpsUrlSchema,
-  defaultBranch: Type.Optional(IdentifierSchema),
+  defaultBranch: Type.Optional(Type.String({ maxLength: 255, minLength: 1 })),
   fullName: Type.String({
     maxLength: 201,
     minLength: 3,

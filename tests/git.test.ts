@@ -16,7 +16,10 @@ const payload = JSON.stringify({
   forced: false,
   pusher: { email: "dev@example.com", name: "Developer" },
   ref: "refs/heads/main",
-  repository: { default_branch: "main", full_name: "absolutejs/example" },
+  repository: {
+    default_branch: "release/main",
+    full_name: "absolutejs/example",
+  },
 });
 const signature = `sha256=${createHmac("sha256", secret).update(payload).digest("hex")}`;
 
@@ -36,6 +39,7 @@ describe("GitHub push ingestion", () => {
       "https://github.com/absolutejs/example.git",
     );
     expect(event.revision.commitSha).toBe("a".repeat(40));
+    expect(event.revision.repository.defaultBranch).toBe("release/main");
     expect(gitIngestionIdempotencyKey("github", event.deliveryId)).toBe(
       "github:delivery-1",
     );
