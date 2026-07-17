@@ -38,6 +38,16 @@ export type GitHubAppInstallationToken = {
   token: string;
 };
 
+export class GitHubApiError extends GitIngestionError {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "GitHubApiError";
+  }
+}
+
 export type GitHubCheckRunConclusion =
   | "action_required"
   | "cancelled"
@@ -86,8 +96,9 @@ const string = (value: unknown, label: string) => {
 
 const json = async (response: Response, label: string) => {
   if (!response.ok)
-    throw new GitIngestionError(
+    throw new GitHubApiError(
       `${label} failed with GitHub status ${response.status}`,
+      response.status,
     );
   try {
     return (await response.json()) as unknown;

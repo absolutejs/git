@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/git",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Provider-neutral authenticated Git source ingestion, webhook normalization, exact-revision materialization, and provenance for Bun and AbsoluteJS.",
   "repository": {
     "type": "git",
@@ -35,6 +35,11 @@
       "import": "./dist/github-app.js",
       "default": "./dist/github-app.js"
     },
+    "./github-app-user": {
+      "types": "./dist/github-app-user.d.ts",
+      "import": "./dist/github-app-user.js",
+      "default": "./dist/github-app-user.js"
+    },
     "./checkout": {
       "types": "./dist/checkout.d.ts",
       "import": "./dist/checkout.js",
@@ -55,7 +60,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "rm -rf dist && bun build src/index.ts src/github.ts src/github-app.ts src/checkout.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/manifest --external @sinclair/typebox --external @sinclair/typebox/value && tsc --project tsconfig.build.json && absolute-manifest emit",
+    "build": "rm -rf dist && bun build src/index.ts src/github.ts src/github-app.ts src/github-app-user.ts src/checkout.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/manifest --external @sinclair/typebox --external @sinclair/typebox/value && tsc --project tsconfig.build.json && absolute-manifest emit",
     "test": "bun test tests/",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"./**/*.{ts,json,md}\"",
@@ -72,6 +77,7 @@
     "deployment"
   ],
   "dependencies": {
+    "@absolutejs/linked-providers": "0.0.2",
     "@absolutejs/manifest": "0.3.0",
     "@sinclair/typebox": "^0.34.0"
   },
