@@ -2,9 +2,18 @@ import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 
 const CommitShaSchema = Type.String({ pattern: "^[a-f0-9]{40,64}$" });
+/* HTTPS, or plain HTTP on a loopback host.
+ *
+ * A customer's repository is always reached over TLS. The exception is
+ * somebody developing against a self-hosted instance running on their own
+ * machine — `http://localhost:3002` — where there is no network to protect
+ * and no certificate to have. Without it the exception is a trap: such an
+ * instance lists and connects, and then fails at the clone, which is the
+ * furthest possible point from the cause. */
 const HttpsUrlSchema = Type.String({
   maxLength: 2048,
-  pattern: "^https://[^\\s]+$",
+  pattern:
+    "^(https://|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:\\d+)?(/|$))[^\\s]*$",
 });
 const IsoTimestampSchema = Type.String({
   pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$",

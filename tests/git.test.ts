@@ -105,4 +105,33 @@ describe("parseGitRepository", () => {
   test("still rejects a name with no owner segment", () => {
     expect(() => parseGitRepository(repository("app"))).toThrow();
   });
+
+  test("accepts plain http only on a loopback host", () => {
+    /* Somebody developing against a self-hosted instance on their own
+     * machine has no network to protect and no certificate to have. Without
+     * this the exception is a trap: such an instance lists and connects, then
+     * fails at the clone — the furthest possible point from the cause.
+     *
+     * `localhost.evil.example` is the case a prefix check would let through. */
+    const at = (cloneUrl: string) => ({
+      cloneUrl,
+      defaultBranch: "main",
+      fullName: "acme/app",
+      provider: "generic" as const,
+      webUrl: cloneUrl,
+    });
+
+    expect(
+      parseGitRepository(at("http://localhost:3002/acme/app.git")).cloneUrl,
+    ).toBe("http://localhost:3002/acme/app.git");
+    expect(
+      parseGitRepository(at("http://127.0.0.1:3002/acme/app.git")).cloneUrl,
+    ).toBe("http://127.0.0.1:3002/acme/app.git");
+    expect(() =>
+      parseGitRepository(at("http://evil.example/acme/app.git")),
+    ).toThrow();
+    expect(() =>
+      parseGitRepository(at("http://localhost.evil.example/acme/app.git")),
+    ).toThrow();
+  });
 });
