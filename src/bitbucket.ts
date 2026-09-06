@@ -143,9 +143,65 @@ const nextPageWithin = (origin: string, payload: Record<string, unknown>) => {
   return parsed.toString();
 };
 
-/** Every repository the token's owner can reach, across all their
- *  workspaces. `role=member` is what excludes the public repositories they
- *  merely have read access to. */
+/** Walk one paged collection to its end, bounded. */
+const pagedValues = async (options: {
+  accessToken: string;
+  call: Fetch;
+  label: string;
+  origin: string;
+  url: string;
+}) => {
+  const collected: unknown[] = [];
+  let url: string | null = options.url;
+  for (let request = 0; request < MAX_PAGES && url !== null; request += 1) {
+    const response: Response = await options.call(url, {
+      headers: bitbucketHeaders(options.accessToken),
+    });
+    const payload = object(await json(response, options.label), options.label);
+    if (!Array.isArray(payload.values))
+      throw new GitIngestionError(`${options.label} is invalid`);
+    collected.push(...payload.values);
+    url = nextPageWithin(options.origin, payload);
+  }
+
+  return collected;
+};
+
+/** The workspaces the token's owner belongs to.
+ *
+ *  Needs the `account` scope, which `repository` alone does not imply: without
+ *  it this answers 404 rather than 403, which reads as a wrong URL rather than
+ *  a missing permission. */
+export const listBitbucketWorkspacesForUser = async (options: {
+  accessToken: string;
+  baseUrl?: string;
+  fetch?: Fetch;
+}): Promise<Array<{ slug: string; uuid: string }>> => {
+  const base = baseFor(options.baseUrl);
+
+  return (
+    await pagedValues({
+      accessToken: options.accessToken,
+      call: options.fetch ?? fetch,
+      label: "Bitbucket workspace listing",
+      origin: new URL(base).origin,
+      url: `${base}/2.0/workspaces?role=member&pagelen=${PAGE_LENGTH}`,
+    })
+  ).map((value) => {
+    const workspace = object(value, "Bitbucket workspace");
+
+    return {
+      slug: string(workspace.slug, "Bitbucket workspace slug"),
+      uuid: string(workspace.uuid, "Bitbucket workspace uuid"),
+    };
+  });
+};
+
+/** Every repository the token's owner can reach, across all their workspaces.
+ *
+ *  Two calls deep because Bitbucket removed the flat cross-workspace listing
+ *  (CHANGE-2770): `/2.0/repositories` now answers 410 whatever you ask it for,
+ *  and repositories are only reachable one workspace at a time. */
 export const listBitbucketRepositoriesForUser = async (options: {
   accessToken: string;
   baseUrl?: string;
@@ -154,22 +210,20 @@ export const listBitbucketRepositoriesForUser = async (options: {
   const base = baseFor(options.baseUrl);
   const { origin } = new URL(base);
   const call = options.fetch ?? fetch;
+  const workspaces = await listBitbucketWorkspacesForUser(options);
   const collected: BitbucketRepository[] = [];
-  let url: string | null =
-    `${base}/2.0/repositories?role=member&pagelen=${PAGE_LENGTH}&sort=full_name`;
-  for (let request = 0; request < MAX_PAGES && url !== null; request += 1) {
-    const response: Response = await call(url, {
-      headers: bitbucketHeaders(options.accessToken),
-    });
-    const payload = object(
-      await json(response, "Bitbucket repository listing"),
-      "Bitbucket repository listing",
+  for (const workspace of workspaces)
+    collected.push(
+      ...(
+        await pagedValues({
+          accessToken: options.accessToken,
+          call,
+          label: "Bitbucket repository listing",
+          origin,
+          url: `${base}/2.0/repositories/${encodeURIComponent(workspace.slug)}?pagelen=${PAGE_LENGTH}&sort=full_name`,
+        })
+      ).map(toRepository),
     );
-    if (!Array.isArray(payload.values))
-      throw new GitIngestionError("Bitbucket repository list is invalid");
-    collected.push(...payload.values.map(toRepository));
-    url = nextPageWithin(origin, payload);
-  }
 
   return collected;
 };

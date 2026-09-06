@@ -58,6 +58,11 @@ const page = (body: unknown) =>
     headers: { "content-type": "application/json" },
   });
 
+/** Bitbucket removed the flat cross-workspace listing, so every listing is
+ *  now workspaces first and repositories per workspace. */
+const workspaces = (...slugs: string[]) =>
+  page({ values: slugs.map((slug) => ({ slug, uuid: `{${slug}-uuid}` })) });
+
 describe("createBitbucketUserClient", () => {
   test("follows the cursor to the end and strips the clone URL's user", async () => {
     const seen: string[] = [];
@@ -66,11 +71,12 @@ describe("createBitbucketUserClient", () => {
       fetch: async (input) => {
         const url = String(input);
         seen.push(url);
+        if (url.includes("/2.0/workspaces")) return workspaces("acme");
         if (url.includes("page=2"))
           return page({ values: [repository("two", false)] });
 
         return page({
-          next: "https://api.bitbucket.org/2.0/repositories?page=2",
+          next: "https://api.bitbucket.org/2.0/repositories/acme?page=2",
           values: [repository("one", true)],
         });
       },
@@ -92,7 +98,10 @@ describe("createBitbucketUserClient", () => {
       id: "{acme-uuid}",
       login: "acme",
     });
-    expect(seen).toHaveLength(2);
+    // Workspaces, then two pages of that workspace's repositories.
+    expect(seen).toHaveLength(3);
+    expect(seen[0]).toContain("/2.0/workspaces");
+    expect(seen[1]).toContain("/2.0/repositories/acme");
   });
 
   test("refuses to carry the token to another origin", async () => {
@@ -100,11 +109,13 @@ describe("createBitbucketUserClient", () => {
     // the owner's token to that host.
     const client = createBitbucketUserClient({
       credentials: resolver(),
-      fetch: async () =>
-        page({
-          next: "https://attacker.example/2.0/repositories?page=2",
-          values: [repository("one", true)],
-        }),
+      fetch: async (input) =>
+        String(input).includes("/2.0/workspaces")
+          ? workspaces("acme")
+          : page({
+              next: "https://attacker.example/2.0/repositories/acme?page=2",
+              values: [repository("one", true)],
+            }),
     });
 
     expect(client.listRepositories("user-1")).rejects.toThrow(
@@ -116,11 +127,13 @@ describe("createBitbucketUserClient", () => {
     let calls = 0;
     const client = createBitbucketUserClient({
       credentials: resolver(),
-      fetch: async () => {
+      fetch: async (input) => {
+        if (String(input).includes("/2.0/workspaces"))
+          return workspaces("acme");
         calls += 1;
 
         return page({
-          next: "https://api.bitbucket.org/2.0/repositories?page=2",
+          next: "https://api.bitbucket.org/2.0/repositories/acme?page=2",
           values: [repository("one", true)],
         });
       },
@@ -134,8 +147,12 @@ describe("createBitbucketUserClient", () => {
   test("reports an empty repository rather than throwing", async () => {
     const client = createBitbucketUserClient({
       credentials: resolver(),
-      fetch: async () =>
-        page({ values: [{ ...repository("fresh", true), mainbranch: null }] }),
+      fetch: async (input) =>
+        String(input).includes("/2.0/workspaces")
+          ? workspaces("acme")
+          : page({
+              values: [{ ...repository("fresh", true), mainbranch: null }],
+            }),
     });
 
     const [entry] = await client.listRepositories("user-1");
@@ -154,8 +171,7 @@ describe("createBitbucketUserClient", () => {
     expect(reports).toEqual([
       {
         code: "unauthorized",
-        message:
-          "Bitbucket repository listing failed with Bitbucket status 401",
+        message: "Bitbucket workspace listing failed with Bitbucket status 401",
       },
     ]);
   });
@@ -206,14 +222,42 @@ describe("createBitbucketUserClient", () => {
       fetch: async (input) => {
         seen.push(String(input));
 
-        return page({ values: [] });
+        return String(input).includes("/2.0/workspaces")
+          ? workspaces("acme")
+          : page({ values: [] });
       },
     });
 
     await client.listRepositories("user-1");
 
     expect(seen[0]).toStartWith(
-      "https://bitbucket.internal.example/2.0/repositories",
+      "https://bitbucket.internal.example/2.0/workspaces",
     );
+    expect(seen[1]).toStartWith(
+      "https://bitbucket.internal.example/2.0/repositories/acme",
+    );
+  });
+
+  test("gathers repositories from every workspace, not just the first", async () => {
+    // The flat cross-workspace listing was removed (CHANGE-2770), so missing
+    // this loop would silently show only one of someone's workspaces.
+    const client = createBitbucketUserClient({
+      credentials: resolver(),
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/2.0/workspaces")) return workspaces("acme", "other");
+        if (url.includes("/2.0/repositories/other"))
+          return page({ values: [repository("three", true)] });
+
+        return page({ values: [repository("one", true)] });
+      },
+    });
+
+    const repositories = await client.listRepositories("user-1");
+
+    expect(repositories.map((entry) => entry.fullName)).toEqual([
+      "acme/one",
+      "acme/three",
+    ]);
   });
 });
