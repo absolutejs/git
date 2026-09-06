@@ -169,14 +169,22 @@ const pagedValues = async (options: {
 
 /** The workspaces the token's owner belongs to.
  *
- *  Needs the `account` scope, which `repository` alone does not imply: without
- *  it this answers 404 rather than 403, which reads as a wrong URL rather than
- *  a missing permission. */
+ *  `/2.0/user/workspaces`, and not one of the three neighbours you will find
+ *  recommended: `/2.0/workspaces`, `/2.0/user/permissions/workspaces` and
+ *  `/2.0/user/permissions/repositories` were all removed with the
+ *  cross-workspace APIs, and answer 404 "There is no API hosted at this URL"
+ *  — which reads as a typo rather than a removal. Much of the migration
+ *  advice written during the deprecation window names the permissions one.
+ *
+ *  Needs the `account` scope, which `repository` alone does not imply.
+ *
+ *  Each entry is an access record wrapping the workspace, so the workspace
+ *  itself is one level down. */
 export const listBitbucketWorkspacesForUser = async (options: {
   accessToken: string;
   baseUrl?: string;
   fetch?: Fetch;
-}): Promise<Array<{ slug: string; uuid: string }>> => {
+}): Promise<Array<{ administrator: boolean; slug: string; uuid: string }>> => {
   const base = baseFor(options.baseUrl);
 
   return (
@@ -185,12 +193,14 @@ export const listBitbucketWorkspacesForUser = async (options: {
       call: options.fetch ?? fetch,
       label: "Bitbucket workspace listing",
       origin: new URL(base).origin,
-      url: `${base}/2.0/workspaces?role=member&pagelen=${PAGE_LENGTH}`,
+      url: `${base}/2.0/user/workspaces?pagelen=${PAGE_LENGTH}`,
     })
   ).map((value) => {
-    const workspace = object(value, "Bitbucket workspace");
+    const access = object(value, "Bitbucket workspace access");
+    const workspace = object(access.workspace, "Bitbucket workspace");
 
     return {
+      administrator: access.administrator === true,
       slug: string(workspace.slug, "Bitbucket workspace slug"),
       uuid: string(workspace.uuid, "Bitbucket workspace uuid"),
     };
@@ -201,7 +211,8 @@ export const listBitbucketWorkspacesForUser = async (options: {
  *
  *  Two calls deep because Bitbucket removed the flat cross-workspace listing
  *  (CHANGE-2770): `/2.0/repositories` now answers 410 whatever you ask it for,
- *  and repositories are only reachable one workspace at a time. */
+ *  and repositories are only reachable one workspace at a time. The N+1 is
+ *  the API's shape, not a missed optimisation. */
 export const listBitbucketRepositoriesForUser = async (options: {
   accessToken: string;
   baseUrl?: string;

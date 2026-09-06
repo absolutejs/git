@@ -61,7 +61,13 @@ const page = (body: unknown) =>
 /** Bitbucket removed the flat cross-workspace listing, so every listing is
  *  now workspaces first and repositories per workspace. */
 const workspaces = (...slugs: string[]) =>
-  page({ values: slugs.map((slug) => ({ slug, uuid: `{${slug}-uuid}` })) });
+  page({
+    values: slugs.map((slug) => ({
+      administrator: true,
+      type: "workspace_access",
+      workspace: { slug, type: "workspace_base", uuid: `{${slug}-uuid}` },
+    })),
+  });
 
 describe("createBitbucketUserClient", () => {
   test("follows the cursor to the end and strips the clone URL's user", async () => {
@@ -71,7 +77,7 @@ describe("createBitbucketUserClient", () => {
       fetch: async (input) => {
         const url = String(input);
         seen.push(url);
-        if (url.includes("/2.0/workspaces")) return workspaces("acme");
+        if (url.includes("/2.0/user/workspaces")) return workspaces("acme");
         if (url.includes("page=2"))
           return page({ values: [repository("two", false)] });
 
@@ -100,7 +106,7 @@ describe("createBitbucketUserClient", () => {
     });
     // Workspaces, then two pages of that workspace's repositories.
     expect(seen).toHaveLength(3);
-    expect(seen[0]).toContain("/2.0/workspaces");
+    expect(seen[0]).toContain("/2.0/user/workspaces");
     expect(seen[1]).toContain("/2.0/repositories/acme");
   });
 
@@ -110,7 +116,7 @@ describe("createBitbucketUserClient", () => {
     const client = createBitbucketUserClient({
       credentials: resolver(),
       fetch: async (input) =>
-        String(input).includes("/2.0/workspaces")
+        String(input).includes("/2.0/user/workspaces")
           ? workspaces("acme")
           : page({
               next: "https://attacker.example/2.0/repositories/acme?page=2",
@@ -128,7 +134,7 @@ describe("createBitbucketUserClient", () => {
     const client = createBitbucketUserClient({
       credentials: resolver(),
       fetch: async (input) => {
-        if (String(input).includes("/2.0/workspaces"))
+        if (String(input).includes("/2.0/user/workspaces"))
           return workspaces("acme");
         calls += 1;
 
@@ -148,7 +154,7 @@ describe("createBitbucketUserClient", () => {
     const client = createBitbucketUserClient({
       credentials: resolver(),
       fetch: async (input) =>
-        String(input).includes("/2.0/workspaces")
+        String(input).includes("/2.0/user/workspaces")
           ? workspaces("acme")
           : page({
               values: [{ ...repository("fresh", true), mainbranch: null }],
@@ -222,7 +228,7 @@ describe("createBitbucketUserClient", () => {
       fetch: async (input) => {
         seen.push(String(input));
 
-        return String(input).includes("/2.0/workspaces")
+        return String(input).includes("/2.0/user/workspaces")
           ? workspaces("acme")
           : page({ values: [] });
       },
@@ -231,7 +237,7 @@ describe("createBitbucketUserClient", () => {
     await client.listRepositories("user-1");
 
     expect(seen[0]).toStartWith(
-      "https://bitbucket.internal.example/2.0/workspaces",
+      "https://bitbucket.internal.example/2.0/user/workspaces",
     );
     expect(seen[1]).toStartWith(
       "https://bitbucket.internal.example/2.0/repositories/acme",
@@ -245,7 +251,8 @@ describe("createBitbucketUserClient", () => {
       credentials: resolver(),
       fetch: async (input) => {
         const url = String(input);
-        if (url.includes("/2.0/workspaces")) return workspaces("acme", "other");
+        if (url.includes("/2.0/user/workspaces"))
+          return workspaces("acme", "other");
         if (url.includes("/2.0/repositories/other"))
           return page({ values: [repository("three", true)] });
 
