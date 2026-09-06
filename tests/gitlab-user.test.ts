@@ -190,4 +190,24 @@ describe("createGitLabUserClient", () => {
     expect(repository.fullName).toBe("acme/nine");
     expect(repository.private).toBe(false);
   });
+
+  test("hands back the owner's token for a clone", async () => {
+    const client = createGitLabUserClient({
+      credentials: resolver(),
+      fetch: async () => new Response("{}"),
+    });
+
+    expect(await client.getAccessToken("user-1")).toBe("glpat_token");
+  });
+
+  test("refuses a token for an owner who has not linked GitLab", () => {
+    const client = createGitLabUserClient({
+      credentials: resolver(),
+      fetch: async () => new Response("{}"),
+    });
+
+    expect(client.getAccessToken("user-2")).rejects.toBeInstanceOf(
+      GitLabUserCredentialUnavailableError,
+    );
+  });
 });

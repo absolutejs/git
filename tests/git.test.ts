@@ -5,6 +5,7 @@ import {
   assertGitRevisionAuthorized,
   gitIngestionIdempotencyKey,
   gitProvenanceFor,
+  parseGitRepository,
 } from "../src";
 import { verifyGitHubPushWebhook } from "../src/github";
 
@@ -83,5 +84,25 @@ describe("GitHub push ingestion", () => {
         event.revision,
       ),
     ).toThrow(GitAuthorizationError);
+  });
+});
+
+describe("parseGitRepository", () => {
+  const repository = (fullName: string) => ({
+    cloneUrl: `https://gitlab.com/${fullName}.git`,
+    defaultBranch: "main",
+    fullName,
+    provider: "gitlab" as const,
+    webUrl: `https://gitlab.com/${fullName}`,
+  });
+
+  test("accepts a nested GitLab group path", () => {
+    expect(parseGitRepository(repository("acme/team/app")).fullName).toBe(
+      "acme/team/app",
+    );
+  });
+
+  test("still rejects a name with no owner segment", () => {
+    expect(() => parseGitRepository(repository("app"))).toThrow();
   });
 });

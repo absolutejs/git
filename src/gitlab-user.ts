@@ -94,6 +94,13 @@ export const createGitLabUserClient = (options: {
     }
   };
 
+  /** The owner's GitLab access token, refreshed when it is close to expiring.
+   *  Cloning a private project needs the raw token as a Basic-auth password
+   *  (with `oauth2` as the username), which is not something this client can
+   *  do on the caller's behalf the way an API call would be. */
+  const getAccessToken = (ownerRef: string) =>
+    withToken(ownerRef, async (accessToken) => accessToken);
+
   const listRepositories = (ownerRef: string) =>
     withToken(ownerRef, async (accessToken) =>
       (
@@ -117,5 +124,5 @@ export const createGitLabUserClient = (options: {
       ),
     );
 
-  return { getRepository, listRepositories };
+  return { getAccessToken, getRepository, listRepositories };
 };

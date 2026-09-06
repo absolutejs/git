@@ -16,7 +16,9 @@ export const GitRepositorySchema = Type.Object({
   fullName: Type.String({
     maxLength: 201,
     minLength: 3,
-    pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+    // GitLab nests groups, so a full name is two segments or more:
+    // "group/subgroup/project" is an ordinary path there, not an edge case.
+    pattern: "^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+$",
   }),
   provider: Type.Union([
     Type.Literal("github"),
