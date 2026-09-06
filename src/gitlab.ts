@@ -136,11 +136,14 @@ export const getGitLabProject = async (options: {
   accessToken: string;
   baseUrl?: string;
   fetch?: Fetch;
-  projectId: number;
+  /** The numeric id, or the project's full path. GitLab accepts a
+   *  URL-encoded `group/subgroup/project` wherever it accepts an id, which is
+   *  what lets a pasted address be resolved without first knowing the id. */
+  projectId: number | string;
 }): Promise<GitLabRepository> => {
   const base = baseFor(options.baseUrl);
   const response = await (options.fetch ?? fetch)(
-    `${base}/api/v4/projects/${options.projectId}`,
+    `${base}/api/v4/projects/${encodeURIComponent(String(options.projectId))}`,
     { headers: gitlabHeaders(options.accessToken) },
   );
 

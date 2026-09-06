@@ -210,4 +210,27 @@ describe("createGitLabUserClient", () => {
       GitLabUserCredentialUnavailableError,
     );
   });
+
+  test("fetches one project by its full path", async () => {
+    // GitLab takes a URL-encoded path wherever it takes an id, which is what
+    // resolves a pasted address without knowing the id first. Nested groups
+    // make the encoding load-bearing.
+    const client = createGitLabUserClient({
+      credentials: resolver(),
+      fetch: async (input) => {
+        expect(String(input)).toContain("/api/v4/projects/acme%2Fteam%2Fapp");
+
+        return new Response(
+          JSON.stringify(project(9, "acme/team/app", "private")),
+          { headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+
+    const repository = await client.getRepository("user-1", {
+      projectId: "acme/team/app",
+    });
+
+    expect(repository.fullName).toBe("acme/team/app");
+  });
 });

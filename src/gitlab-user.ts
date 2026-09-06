@@ -112,7 +112,10 @@ export const createGitLabUserClient = (options: {
       ).map(withAccount),
     );
 
-  const getRepository = (ownerRef: string, input: { projectId: number }) =>
+  const getRepository = (
+    ownerRef: string,
+    input: { projectId: number | string },
+  ) =>
     withToken(ownerRef, async (accessToken) =>
       withAccount(
         await getGitLabProject({
