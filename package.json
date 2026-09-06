@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/git",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Provider-neutral authenticated Git source ingestion, webhook normalization, exact-revision materialization, and provenance for Bun and AbsoluteJS.",
   "repository": {
     "type": "git",
@@ -24,6 +24,21 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./bitbucket": {
+      "types": "./dist/bitbucket.d.ts",
+      "import": "./dist/bitbucket.js",
+      "default": "./dist/bitbucket.js"
+    },
+    "./bitbucket-user": {
+      "types": "./dist/bitbucket-user.d.ts",
+      "import": "./dist/bitbucket-user.js",
+      "default": "./dist/bitbucket-user.js"
+    },
+    "./checkout": {
+      "types": "./dist/checkout.d.ts",
+      "import": "./dist/checkout.js",
+      "default": "./dist/checkout.js"
     },
     "./github": {
       "types": "./dist/github.d.ts",
@@ -50,11 +65,6 @@
       "import": "./dist/gitlab-user.js",
       "default": "./dist/gitlab-user.js"
     },
-    "./checkout": {
-      "types": "./dist/checkout.d.ts",
-      "import": "./dist/checkout.js",
-      "default": "./dist/checkout.js"
-    },
     "./manifest": {
       "types": "./dist/manifest.d.ts",
       "import": "./dist/manifest.js",
@@ -70,7 +80,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "rm -rf dist && bun build src/index.ts src/github.ts src/github-app.ts src/github-app-user.ts src/gitlab.ts src/gitlab-user.ts src/checkout.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/manifest --external @sinclair/typebox --external @sinclair/typebox/value && tsc --project tsconfig.build.json && absolute-manifest emit",
+    "build": "rm -rf dist && bun build src/index.ts src/github.ts src/github-app.ts src/github-app-user.ts src/gitlab.ts src/gitlab-user.ts src/bitbucket.ts src/bitbucket-user.ts src/checkout.ts src/manifest.ts --outdir dist --sourcemap --target=bun --external @absolutejs/manifest --external @sinclair/typebox --external @sinclair/typebox/value && tsc --project tsconfig.build.json && absolute-manifest emit",
     "test": "bun test tests/",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"./**/*.{ts,json,md}\"",
