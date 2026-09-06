@@ -96,8 +96,27 @@ const measureCheckout = async (
   return { bytes, files };
 };
 
+/**
+ * How a host wants to be told who is asking.
+ *
+ * Almost everyone takes HTTP Basic with the token as the password and their
+ * own username beside it. Azure DevOps documents a bearer header for an Entra
+ * token instead — Basic with a JWT as the password is widely reported to work
+ * there, but it is undocumented, and this is not the place to rely on that.
+ */
+export type GitCheckoutCredential =
+  | { scheme?: "basic"; token: string; username?: string }
+  | { scheme: "bearer"; token: string };
+
+const authorizationHeader = (credential: GitCheckoutCredential) =>
+  credential.scheme === "bearer"
+    ? `Authorization: Bearer ${credential.token}`
+    : `Authorization: Basic ${Buffer.from(
+        `${credential.username ?? "x-access-token"}:${credential.token}`,
+      ).toString("base64")}`;
+
 export const createGitCheckout = async (options: {
-  credential?: { token: string; username?: string };
+  credential?: GitCheckoutCredential;
   maxBytes?: number;
   maxFiles?: number;
   revision: GitRevision;
@@ -114,7 +133,7 @@ export const createGitCheckout = async (options: {
     ? {
         GIT_CONFIG_COUNT: "1",
         GIT_CONFIG_KEY_0: `http.${new URL(revision.repository.cloneUrl).origin}/.extraheader`,
-        GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(`${options.credential.username ?? "x-access-token"}:${options.credential.token}`).toString("base64")}`,
+        GIT_CONFIG_VALUE_0: authorizationHeader(options.credential),
         GIT_TERMINAL_PROMPT: "0",
       }
     : { GIT_TERMINAL_PROMPT: "0" };
