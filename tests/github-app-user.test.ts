@@ -45,6 +45,7 @@ const githubFetch = async (input: string | URL | Request) => {
         {
           account: { id: 7, login: "absolutejs" },
           id: 11,
+          html_url: "https://github.com/settings/installations/11",
           repository_selection: "selected",
         },
       ],
@@ -81,6 +82,7 @@ describe("GitHub App user client", () => {
         fullName: "absolutejs/PAAS",
         id: 23,
         installationId: 11,
+        installationUrl: "https://github.com/settings/installations/11",
         private: true,
         repositorySelection: "selected",
         webUrl: "https://github.com/absolutejs/PAAS",
@@ -100,11 +102,13 @@ describe("GitHub App user client", () => {
             {
               account: { id: 7, login: "absolutejs" },
               id: 11,
+              html_url: "https://github.com/settings/installations/11",
               repository_selection: "selected",
             },
             {
               account: { id: 8, login: "acme" },
               id: 12,
+              html_url: "https://github.com/settings/installations/11",
               repository_selection: "all",
             },
           ],

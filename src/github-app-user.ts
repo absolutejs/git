@@ -29,6 +29,8 @@ export type GitHubAppUserRepository = GitHubAppRepository & {
    * call.
    */
   repositorySelection: "all" | "selected";
+  /** Where the installation this came through is configured on GitHub. */
+  installationUrl: string;
 };
 
 export class GitHubUserCredentialUnavailableError extends GitIngestionError {}
@@ -106,6 +108,7 @@ export const createGitHubAppUserClient = (options: {
             ...repository,
             account: installation.account,
             installationId: installation.id,
+            installationUrl: installation.installationUrl,
             repositorySelection: installation.repositorySelection,
           })),
         ),
@@ -147,6 +150,7 @@ export const createGitHubAppUserClient = (options: {
         ...repository,
         account: installation.account,
         installationId: installation.id,
+        installationUrl: installation.installationUrl,
         repositorySelection: installation.repositorySelection,
       };
     });

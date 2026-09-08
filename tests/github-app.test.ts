@@ -125,6 +125,7 @@ describe("GitHub App authentication", () => {
       {
         account: { id: 2, login: "absolutejs" },
         id: 3,
+        html_url: "https://github.com/settings/installations/11",
         repository_selection: "selected",
       },
       { expires_at: "2026-01-01T01:00:00Z", token: "ghs_token" },
@@ -187,6 +188,7 @@ describe("GitHub App authentication", () => {
           {
             account: { id: 2, login: "absolutejs" },
             id: 3,
+            html_url: "https://github.com/settings/installations/11",
             repository_selection: "selected",
           },
         ],

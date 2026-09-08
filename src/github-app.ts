@@ -29,6 +29,16 @@ type HeaderSource = Headers | Record<string, string | undefined>;
 export type GitHubAppInstallation = {
   account: { id: number; login: string };
   id: number;
+  /**
+   * Where this installation is configured on GitHub -- the page that adds
+   * repositories to it or widens it to all of them.
+   *
+   * Taken from the API rather than assembled, because the path differs by
+   * account type: a personal installation lives under `/settings`, an
+   * organisation's under `/organizations/<login>/settings`, and a caller
+   * that guesses gets one of the two wrong.
+   */
+  installationUrl: string;
   repositorySelection: "all" | "selected";
 };
 
@@ -289,6 +299,7 @@ export const getGitHubAppInstallation = async (options: {
       login: string(account.login, "GitHub account login"),
     },
     id: integer(payload.id, "GitHub installation id"),
+    installationUrl: string(payload.html_url, "GitHub installation URL"),
     repositorySelection: selection,
   };
 };
@@ -397,6 +408,10 @@ export const listGitHubAppInstallationsForUser = async (options: {
         login: string(account.login, "GitHub account login"),
       },
       id: integer(installation.id, "GitHub installation id"),
+      installationUrl: string(
+        installation.html_url,
+        "GitHub installation URL",
+      ),
       repositorySelection: selection,
     };
   });
