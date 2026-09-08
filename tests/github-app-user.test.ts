@@ -82,8 +82,63 @@ describe("GitHub App user client", () => {
         id: 23,
         installationId: 11,
         private: true,
+        repositorySelection: "selected",
         webUrl: "https://github.com/absolutejs/PAAS",
       },
+    ]);
+  });
+
+  test("carries what each installation was granted onto its repositories", async () => {
+    /* Two installations, granted differently. Listing flattens them into one
+       array, so without this on each repository a caller cannot tell which
+       account will show a repository added tomorrow and which will not. */
+    const twoInstallations = async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/user/installations?"))
+        return Response.json({
+          installations: [
+            {
+              account: { id: 7, login: "absolutejs" },
+              id: 11,
+              repository_selection: "selected",
+            },
+            {
+              account: { id: 8, login: "acme" },
+              id: 12,
+              repository_selection: "all",
+            },
+          ],
+        });
+      const repository = (id: number, fullName: string) => ({
+        clone_url: `https://github.com/${fullName}.git`,
+        default_branch: "main",
+        full_name: fullName,
+        html_url: `https://github.com/${fullName}`,
+        id,
+        private: false,
+      });
+      if (url.includes("/user/installations/11/repositories?"))
+        return Response.json({
+          repositories: [repository(23, "absolutejs/PAAS")],
+        });
+      if (url.includes("/user/installations/12/repositories?"))
+        return Response.json({ repositories: [repository(24, "acme/site")] });
+
+      return new Response("not found", { status: 404 });
+    };
+    const client = createGitHubAppUserClient({
+      credentials: resolver(),
+      fetch: twoInstallations,
+    });
+
+    expect(
+      (await client.listRepositories("user-1")).map((entry) => [
+        entry.fullName,
+        entry.repositorySelection,
+      ]),
+    ).toEqual([
+      ["absolutejs/PAAS", "selected"],
+      ["acme/site", "all"],
     ]);
   });
 
@@ -98,7 +153,11 @@ describe("GitHub App user client", () => {
         installationId: 11,
         repositoryId: 23,
       }),
-    ).toMatchObject({ fullName: "absolutejs/PAAS", installationId: 11 });
+    ).toMatchObject({
+      fullName: "absolutejs/PAAS",
+      installationId: 11,
+      repositorySelection: "selected",
+    });
   });
 
   test("requires a linked GitHub credential", async () => {

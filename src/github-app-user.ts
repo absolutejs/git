@@ -19,6 +19,16 @@ type Fetch = (
 export type GitHubAppUserRepository = GitHubAppRepository & {
   account: { id: number; login: string };
   installationId: number;
+  /**
+   * What the installation this repository came through was granted: every
+   * repository on the account, or only the ones somebody chose.
+   *
+   * Carried onto each repository because listing flattens the installations
+   * away, and a caller that wants to say "anything you add later will appear"
+   * has nowhere else to learn it from without repeating the installation
+   * call.
+   */
+  repositorySelection: "all" | "selected";
 };
 
 export class GitHubUserCredentialUnavailableError extends GitIngestionError {}
@@ -96,6 +106,7 @@ export const createGitHubAppUserClient = (options: {
             ...repository,
             account: installation.account,
             installationId: installation.id,
+            repositorySelection: installation.repositorySelection,
           })),
         ),
       );
@@ -136,6 +147,7 @@ export const createGitHubAppUserClient = (options: {
         ...repository,
         account: installation.account,
         installationId: installation.id,
+        repositorySelection: installation.repositorySelection,
       };
     });
 
