@@ -207,6 +207,35 @@ export const listBitbucketWorkspacesForUser = async (options: {
   });
 };
 
+/** The account the token belongs to.
+ *
+ *  Bitbucket identifies an account by an immutable uuid; the username can be
+ *  changed by its owner, so it is what a person recognises rather than what a
+ *  stored connection is keyed by. The address is not on this response and
+ *  needs `/2.0/user/emails`, a separate scope, so it is deliberately absent.
+ *
+ *  Needs the `account` scope. */
+export const getBitbucketUser = async (options: {
+  accessToken: string;
+  baseUrl?: string;
+  fetch?: Fetch;
+}) => {
+  const response = await (options.fetch ?? fetch)(
+    `${baseFor(options.baseUrl)}/2.0/user`,
+    { headers: bitbucketHeaders(options.accessToken) },
+  );
+  const user = object(await json(response, "Bitbucket user"), "Bitbucket user");
+  const { display_name: displayName } = user;
+  return {
+    displayName:
+      typeof displayName === "string" && displayName.length > 0
+        ? displayName
+        : null,
+    username: string(user.username, "Bitbucket username"),
+    uuid: string(user.uuid, "Bitbucket user uuid"),
+  };
+};
+
 /** Every repository the token's owner can reach, across all their workspaces.
  *
  *  Two calls deep because Bitbucket removed the flat cross-workspace listing

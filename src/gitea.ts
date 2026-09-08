@@ -113,8 +113,14 @@ export const getGiteaUser = async (options: {
     { headers: giteaHeaders(options.accessToken) },
   );
   const user = object(await json(response, "Gitea user"), "Gitea user");
+  const { email, full_name: fullName } = user;
 
   return {
+    // Both are for showing a person which account this is; an instance can be
+    // configured to keep the address off this response.
+    email: typeof email === "string" && email.length > 0 ? email : null,
+    fullName:
+      typeof fullName === "string" && fullName.length > 0 ? fullName : null,
     id: integer(user.id, "Gitea user id"),
     login: string(user.login, "Gitea user login"),
   };

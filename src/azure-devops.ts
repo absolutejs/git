@@ -101,7 +101,21 @@ export const getAzureDevOpsProfile = async (options: {
     "Azure DevOps profile",
   );
 
-  return { id: string(profile.id, "Azure DevOps profile id") };
+  const { displayName, emailAddress } = profile;
+  return {
+    // What the organization listing is keyed by, and what a stored connection
+    // is keyed by. The other two are for showing a person which account this
+    // is, and Azure DevOps omits either one on a profile that has none.
+    displayName:
+      typeof displayName === "string" && displayName.length > 0
+        ? displayName
+        : null,
+    emailAddress:
+      typeof emailAddress === "string" && emailAddress.length > 0
+        ? emailAddress
+        : null,
+    id: string(profile.id, "Azure DevOps profile id"),
+  };
 };
 
 /** The organizations the user belongs to. Served from the identity origin,

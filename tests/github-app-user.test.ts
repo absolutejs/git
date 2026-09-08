@@ -219,7 +219,10 @@ describe("GitHub App user client", () => {
         bindingId: bindingId ?? "binding-a",
       }),
     } as unknown as LinkedProviderCredentialResolver;
-    const byToken = async (input: string | URL | Request, init?: RequestInit) => {
+    const byToken = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       const auth = String(
         new Headers(init?.headers).get("authorization") ?? "",
       ).replace("Bearer ", "");

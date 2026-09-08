@@ -105,6 +105,31 @@ const toRepository = (value: unknown): GitLabRepository => {
   };
 };
 
+/** The account the token belongs to.
+ *
+ *  Same instance, same endpoint whether the token came from gitlab.com or an
+ *  operator's own GitLab, so a deployment holding several tokens can tell
+ *  which account each one speaks for. */
+export const getGitLabUser = async (options: {
+  accessToken: string;
+  baseUrl?: string;
+  fetch?: Fetch;
+}) => {
+  const response = await (options.fetch ?? fetch)(
+    `${baseFor(options.baseUrl)}/api/v4/user`,
+    { headers: gitlabHeaders(options.accessToken) },
+  );
+  const user = object(await json(response, "GitLab user"), "GitLab user");
+  const { email, name } = user;
+  return {
+    // Present only when the token carries a scope that may read it.
+    email: typeof email === "string" && email.length > 0 ? email : null,
+    id: integer(user.id, "GitLab user id"),
+    name: typeof name === "string" && name.length > 0 ? name : null,
+    username: string(user.username, "GitLab username"),
+  };
+};
+
 /** Every project the token's owner is a member of, across all their groups. */
 export const listGitLabProjectsForUser = async (options: {
   accessToken: string;

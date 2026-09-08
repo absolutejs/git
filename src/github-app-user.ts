@@ -88,9 +88,7 @@ export const createGitHubAppUserClient = (options: {
       status: "active",
     });
 
-    return bindings.filter(
-      (binding) => binding.connectorProvider === "github",
-    );
+    return bindings.filter((binding) => binding.connectorProvider === "github");
   };
 
   const withToken = async <Result>(
@@ -193,29 +191,29 @@ export const createGitHubAppUserClient = (options: {
     withToken(
       ownerRef,
       async (userAccessToken) => {
-      const installations = await listGitHubAppInstallationsForUser({
-        ...(options.fetch ? { fetch: options.fetch } : {}),
-        userAccessToken,
-      });
-      const installation = installations.find(
-        (candidate) => candidate.id === input.installationId,
-      );
-      if (!installation)
-        throw new GitIngestionError(
-          "GitHub installation is not accessible to this user",
+        const installations = await listGitHubAppInstallationsForUser({
+          ...(options.fetch ? { fetch: options.fetch } : {}),
+          userAccessToken,
+        });
+        const installation = installations.find(
+          (candidate) => candidate.id === input.installationId,
         );
-      const repositories = await listGitHubAppRepositoriesForUser({
-        ...(options.fetch ? { fetch: options.fetch } : {}),
-        installationId: installation.id,
-        userAccessToken,
-      });
-      const repository = repositories.find(
-        (candidate) => candidate.id === input.repositoryId,
-      );
-      if (!repository)
-        throw new GitIngestionError(
-          "GitHub repository is not accessible to this installation and user",
+        if (!installation)
+          throw new GitIngestionError(
+            "GitHub installation is not accessible to this user",
+          );
+        const repositories = await listGitHubAppRepositoriesForUser({
+          ...(options.fetch ? { fetch: options.fetch } : {}),
+          installationId: installation.id,
+          userAccessToken,
+        });
+        const repository = repositories.find(
+          (candidate) => candidate.id === input.repositoryId,
         );
+        if (!repository)
+          throw new GitIngestionError(
+            "GitHub repository is not accessible to this installation and user",
+          );
 
         return {
           ...repository,

@@ -381,6 +381,34 @@ export const listGitHubAppRepositories = async (options: {
   });
 };
 
+/** The account a user access token belongs to.
+ *
+ *  Which installations a token can see follows from which account authorized
+ *  it, so a deployment that stores one token per account has to know which
+ *  account that is. GitHub answers this for a GitHub App user token as well as
+ *  for an OAuth one. */
+export const getGitHubUser = async (options: {
+  fetch?: Fetch;
+  userAccessToken: string;
+}) => {
+  const response = await (options.fetch ?? fetch)(
+    "https://api.github.com/user",
+    {
+      headers: githubHeaders(options.userAccessToken),
+    },
+  );
+  const user = object(await json(response, "GitHub user"), "GitHub user");
+  const { email, name } = user;
+  return {
+    // A GitHub account may keep its address private, in which case /user
+    // reports null rather than omitting the field.
+    email: typeof email === "string" && email.length > 0 ? email : null,
+    id: integer(user.id, "GitHub user id"),
+    login: string(user.login, "GitHub user login"),
+    name: typeof name === "string" && name.length > 0 ? name : null,
+  };
+};
+
 export const listGitHubAppInstallationsForUser = async (options: {
   fetch?: Fetch;
   userAccessToken: string;
