@@ -301,4 +301,40 @@ describe("GitHub App authentication", () => {
       }),
     ).toThrow("action is unsupported");
   });
+
+  test("follows every page of a listing rather than the first hundred", async () => {
+    /* Nothing here followed GitHub's pages, so an installation granted an
+       account with more than a hundred repositories silently listed a
+       hundred. A single-page fixture cannot fail on that. */
+    const repository = (id: number) => ({
+      clone_url: `https://github.com/absolutejs/r${id}.git`,
+      default_branch: "main",
+      full_name: `absolutejs/r${id}`,
+      html_url: `https://github.com/absolutejs/r${id}`,
+      id,
+      private: false,
+    });
+    const pages: Record<string, unknown[]> = {
+      "1": Array.from({ length: 100 }, (_, index) => repository(index + 1)),
+      "2": Array.from({ length: 30 }, (_, index) => repository(index + 101)),
+    };
+    const seen: string[] = [];
+    const paged = async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      const page = url.searchParams.get("page") ?? "1";
+      seen.push(page);
+
+      return Response.json({ repositories: pages[page] ?? [] });
+    };
+
+    const listed = await listGitHubAppRepositories({
+      fetch: paged,
+      installationToken: "ghs_token",
+    });
+
+    expect(listed).toHaveLength(130);
+    expect(listed.at(-1)?.fullName).toBe("absolutejs/r130");
+    // Stops on the short page instead of asking for a third.
+    expect(seen).toEqual(["1", "2"]);
+  });
 });

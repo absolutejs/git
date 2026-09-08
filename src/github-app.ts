@@ -9,6 +9,14 @@ import {
 import { verifyGitHubPushWebhook, verifyGitHubWebhookEnvelope } from "./github";
 
 const API_VERSION = "2022-11-28";
+/* GitHub's listings are paged and its maximum page is 100. Nothing here
+   followed the pages, so every one of these calls silently returned the
+   first hundred and dropped the rest -- invisible while an installation was
+   granted a handful of repositories, and wrong the moment it was granted an
+   account with more than a hundred on it. Bounded like the GitLab and Gitea
+   clients so a broken cursor cannot loop forever. */
+const PER_PAGE = 100;
+const MAX_PAGES = 40;
 const JWT_LIFETIME_SECONDS = 9 * 60;
 const JWT_CLOCK_SKEW_SECONDS = 60;
 
@@ -314,21 +322,42 @@ export const createGitHubAppInstallationToken = async (options: {
   };
 };
 
+/** Walks a paged GitHub listing whose body is `{ <key>: [...] }`, stopping
+ *  on the first short page. */
+const listPages = async (
+  call: Fetch,
+  url: (page: number) => string,
+  token: string,
+  key: string,
+  label: string,
+): Promise<unknown[]> => {
+  const collected: unknown[] = [];
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const response = await call(url(page), { headers: githubHeaders(token) });
+    const payload = object(await json(response, label), label);
+    const entries = payload[key];
+    if (!Array.isArray(entries))
+      throw new GitIngestionError(`${label} is invalid`);
+    collected.push(...entries);
+    if (entries.length < PER_PAGE) break;
+  }
+
+  return collected;
+};
+
 export const listGitHubAppRepositories = async (options: {
   fetch?: Fetch;
   installationToken: string;
 }): Promise<GitHubAppRepository[]> => {
-  const response = await (options.fetch ?? fetch)(
-    "https://api.github.com/installation/repositories?per_page=100",
-    { headers: githubHeaders(options.installationToken) },
+  const entries = await listPages(
+    options.fetch ?? fetch,
+    (page) =>
+      `https://api.github.com/installation/repositories?per_page=${PER_PAGE}&page=${page}`,
+    options.installationToken,
+    "repositories",
+    "GitHub repository listing",
   );
-  const payload = object(
-    await json(response, "GitHub repository listing"),
-    "GitHub repository list",
-  );
-  if (!Array.isArray(payload.repositories))
-    throw new GitIngestionError("GitHub repository list is invalid");
-  return payload.repositories.map((value) => {
+  return entries.map((value) => {
     const repository = object(value, "GitHub repository");
     return {
       cloneUrl: string(repository.clone_url, "GitHub repository clone URL"),
@@ -345,17 +374,15 @@ export const listGitHubAppInstallationsForUser = async (options: {
   fetch?: Fetch;
   userAccessToken: string;
 }): Promise<GitHubAppInstallation[]> => {
-  const response = await (options.fetch ?? fetch)(
-    "https://api.github.com/user/installations?per_page=100",
-    { headers: githubHeaders(options.userAccessToken) },
+  const entries = await listPages(
+    options.fetch ?? fetch,
+    (page) =>
+      `https://api.github.com/user/installations?per_page=${PER_PAGE}&page=${page}`,
+    options.userAccessToken,
+    "installations",
+    "GitHub user installation listing",
   );
-  const payload = object(
-    await json(response, "GitHub user installation listing"),
-    "GitHub user installation list",
-  );
-  if (!Array.isArray(payload.installations))
-    throw new GitIngestionError("GitHub user installation list is invalid");
-  return payload.installations.map((value) => {
+  return entries.map((value) => {
     const installation = object(value, "GitHub installation");
     const account = object(installation.account, "GitHub installation account");
     const selection = string(
@@ -380,17 +407,15 @@ export const listGitHubAppRepositoriesForUser = async (options: {
   installationId: number;
   userAccessToken: string;
 }): Promise<GitHubAppRepository[]> => {
-  const response = await (options.fetch ?? fetch)(
-    `https://api.github.com/user/installations/${options.installationId}/repositories?per_page=100`,
-    { headers: githubHeaders(options.userAccessToken) },
+  const entries = await listPages(
+    options.fetch ?? fetch,
+    (page) =>
+      `https://api.github.com/user/installations/${options.installationId}/repositories?per_page=${PER_PAGE}&page=${page}`,
+    options.userAccessToken,
+    "repositories",
+    "GitHub user repository listing",
   );
-  const payload = object(
-    await json(response, "GitHub user repository listing"),
-    "GitHub user repository list",
-  );
-  if (!Array.isArray(payload.repositories))
-    throw new GitIngestionError("GitHub user repository list is invalid");
-  return payload.repositories.map((value) => {
+  return entries.map((value) => {
     const repository = object(value, "GitHub repository");
     return {
       cloneUrl: string(repository.clone_url, "GitHub repository clone URL"),
