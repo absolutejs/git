@@ -56,11 +56,12 @@ export const createGitHubAppUserClient = (options: {
   fetch?: Fetch;
   minTokenValidityMs?: number;
 }) => {
-  const credentialFor = async (ownerRef: string) => {
+  const credentialFor = async (ownerRef: string, bindingId?: string) => {
     const credential = await options.credentials.resolveCredential({
       connectorProvider: "github",
       ownerRef,
       purpose: "interactive_test",
+      ...(bindingId ? { bindingId } : {}),
     });
     if (!credential)
       throw new GitHubUserCredentialUnavailableError(
@@ -70,14 +71,37 @@ export const createGitHubAppUserClient = (options: {
     return credential;
   };
 
+  /**
+   * Every GitHub identity this owner has linked, or nothing when the resolver
+   * does not keep more than one.
+   *
+   * A GitHub App installation belongs to an account, and `/user/installations`
+   * only ever returns the installations the token's own user can reach. Two
+   * personal accounts share none of each other's, so a caller with one
+   * credential sees one account's repositories and has no way to know the
+   * others exist. Asking for the bindings is how it finds out.
+   */
+  const githubBindings = async (ownerRef: string) => {
+    const bindings = await options.credentials.listBindings({
+      connectorProvider: "github",
+      ownerRef,
+      status: "active",
+    });
+
+    return bindings.filter(
+      (binding) => binding.connectorProvider === "github",
+    );
+  };
+
   const withToken = async <Result>(
     ownerRef: string,
     operation: (
       accessToken: string,
       credential: ResolvedLinkedProviderCredential,
     ) => Promise<Result>,
+    bindingId?: string,
   ) => {
-    const credential = await credentialFor(ownerRef);
+    const credential = await credentialFor(ownerRef, bindingId);
     try {
       const lease = await options.credentials.getAccessToken(credential, {
         minValidityMs: options.minTokenValidityMs ?? 60_000,
@@ -90,38 +114,85 @@ export const createGitHubAppUserClient = (options: {
     }
   };
 
-  const listRepositories = (ownerRef: string) =>
-    withToken(ownerRef, async (userAccessToken) => {
-      const installations = await listGitHubAppInstallationsForUser({
-        ...(options.fetch ? { fetch: options.fetch } : {}),
-        userAccessToken,
-      });
-      const repositories = await Promise.all(
-        installations.map(async (installation) =>
-          (
-            await listGitHubAppRepositoriesForUser({
-              ...(options.fetch ? { fetch: options.fetch } : {}),
+  const forOneIdentity = (ownerRef: string, bindingId?: string) =>
+    withToken(
+      ownerRef,
+      async (userAccessToken) => {
+        const installations = await listGitHubAppInstallationsForUser({
+          ...(options.fetch ? { fetch: options.fetch } : {}),
+          userAccessToken,
+        });
+        const repositories = await Promise.all(
+          installations.map(async (installation) =>
+            (
+              await listGitHubAppRepositoriesForUser({
+                ...(options.fetch ? { fetch: options.fetch } : {}),
+                installationId: installation.id,
+                userAccessToken,
+              })
+            ).map((repository) => ({
+              ...repository,
+              account: installation.account,
               installationId: installation.id,
-              userAccessToken,
-            })
-          ).map((repository) => ({
-            ...repository,
-            account: installation.account,
-            installationId: installation.id,
-            installationUrl: installation.installationUrl,
-            repositorySelection: installation.repositorySelection,
-          })),
-        ),
-      );
+              installationUrl: installation.installationUrl,
+              repositorySelection: installation.repositorySelection,
+            })),
+          ),
+        );
 
-      return repositories.flat();
-    });
+        return repositories.flat();
+      },
+      bindingId,
+    );
 
-  const getRepository = (
+  /**
+   * Every repository this owner can reach, across every GitHub identity they
+   * have linked.
+   *
+   * One identity was the old behaviour and is still the fallback, for a
+   * resolver that keeps one credential and returns no bindings. With more
+   * than one, each is asked separately -- there is no endpoint that spans
+   * them, because the question "which installations can you see" is only ever
+   * asked of one token.
+   *
+   * Deduplicated by repository id: two people who have both linked, and who
+   * both belong to the same organisation, reach the same installation and
+   * would otherwise list its repositories twice. One failing identity does
+   * not lose the others, but a failure with no successes at all is raised
+   * rather than passed off as an empty account.
+   */
+  const listRepositories = async (ownerRef: string) => {
+    const bindings = await githubBindings(ownerRef);
+    if (bindings.length <= 1) return forOneIdentity(ownerRef);
+    const settled = await Promise.allSettled(
+      bindings.map((binding) => forOneIdentity(ownerRef, binding.id)),
+    );
+    const reached = settled.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    if (reached.length === 0) {
+      const [first] = settled;
+      throw first && first.status === "rejected"
+        ? first.reason
+        : new GitHubUserCredentialUnavailableError(
+            "No linked GitHub identity could be reached",
+          );
+    }
+    const seen = new Map<number, GitHubAppUserRepository>();
+    for (const repository of reached.flat())
+      if (!seen.has(repository.id)) seen.set(repository.id, repository);
+
+    return [...seen.values()];
+  };
+
+  const oneRepository = (
     ownerRef: string,
     input: { installationId: number; repositoryId: number },
+    bindingId?: string,
   ) =>
-    withToken(ownerRef, async (userAccessToken) => {
+    withToken(
+      ownerRef,
+      async (userAccessToken) => {
       const installations = await listGitHubAppInstallationsForUser({
         ...(options.fetch ? { fetch: options.fetch } : {}),
         userAccessToken,
@@ -146,14 +217,42 @@ export const createGitHubAppUserClient = (options: {
           "GitHub repository is not accessible to this installation and user",
         );
 
-      return {
-        ...repository,
-        account: installation.account,
-        installationId: installation.id,
-        installationUrl: installation.installationUrl,
-        repositorySelection: installation.repositorySelection,
-      };
-    });
+        return {
+          ...repository,
+          account: installation.account,
+          installationId: installation.id,
+          installationUrl: installation.installationUrl,
+          repositorySelection: installation.repositorySelection,
+        };
+      },
+      bindingId,
+    );
+
+  /**
+   * The installation belongs to one account, and only the identities with
+   * access to that account can see it -- so with several linked, this is a
+   * search for the one that can rather than a lookup through whichever
+   * credential happened to resolve first.
+   */
+  const getRepository = async (
+    ownerRef: string,
+    input: { installationId: number; repositoryId: number },
+  ) => {
+    const bindings = await githubBindings(ownerRef);
+    if (bindings.length <= 1) return oneRepository(ownerRef, input);
+    let failure: unknown;
+    for (const binding of bindings)
+      try {
+        return await oneRepository(ownerRef, input, binding.id);
+      } catch (error) {
+        failure = error;
+      }
+    throw failure instanceof Error
+      ? failure
+      : new GitIngestionError(
+          "GitHub repository is not accessible to any linked identity",
+        );
+  };
 
   return { getRepository, listRepositories };
 };

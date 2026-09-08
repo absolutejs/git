@@ -408,10 +408,7 @@ export const listGitHubAppInstallationsForUser = async (options: {
         login: string(account.login, "GitHub account login"),
       },
       id: integer(installation.id, "GitHub installation id"),
-      installationUrl: string(
-        installation.html_url,
-        "GitHub installation URL",
-      ),
+      installationUrl: string(installation.html_url, "GitHub installation URL"),
       repositorySelection: selection,
     };
   });

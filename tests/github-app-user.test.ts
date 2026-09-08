@@ -189,4 +189,76 @@ describe("GitHub App user client", () => {
       { code: "unauthorized", message: expect.stringContaining("401") },
     ]);
   });
+
+  test("lists across every linked GitHub identity, not just the first", async () => {
+    /* A GitHub App installation belongs to an account, and
+       `/user/installations` only returns the ones that token's own user can
+       reach. Two personal accounts share none of each other's, so a customer
+       who links both sees one account's repositories unless each identity is
+       asked separately. */
+    const tokens: Record<string, string> = {
+      "binding-a": "ghu_a",
+      "binding-b": "ghu_b",
+    };
+    const perToken: Record<string, { account: string; id: number }> = {
+      ghu_a: { account: "absolutejs", id: 11 },
+      ghu_b: { account: "alexkahndev", id: 22 },
+    };
+    const many: LinkedProviderCredentialResolver = {
+      getAccessToken: async (used: ResolvedLinkedProviderCredential) => ({
+        accessToken: tokens[used.bindingId] ?? "ghu_none",
+        grantedScopes: [],
+      }),
+      listBindings: async () => [
+        { connectorProvider: "github", id: "binding-a" },
+        { connectorProvider: "github", id: "binding-b" },
+      ],
+      reportFailure: async () => undefined,
+      resolveCredential: async ({ bindingId }: { bindingId?: string }) => ({
+        ...credential,
+        bindingId: bindingId ?? "binding-a",
+      }),
+    } as unknown as LinkedProviderCredentialResolver;
+    const byToken = async (input: string | URL | Request, init?: RequestInit) => {
+      const auth = String(
+        new Headers(init?.headers).get("authorization") ?? "",
+      ).replace("Bearer ", "");
+      const who = perToken[auth];
+      if (!who) return new Response("unauthorized", { status: 401 });
+      const url = String(input);
+      if (url.includes("/user/installations?"))
+        return Response.json({
+          installations: [
+            {
+              account: { id: who.id, login: who.account },
+              html_url: `https://github.com/settings/installations/${who.id}`,
+              id: who.id,
+              repository_selection: "all",
+            },
+          ],
+        });
+
+      return Response.json({
+        repositories: [
+          {
+            clone_url: `https://github.com/${who.account}/only.git`,
+            default_branch: "main",
+            full_name: `${who.account}/only`,
+            html_url: `https://github.com/${who.account}/only`,
+            id: who.id * 100,
+            private: false,
+          },
+        ],
+      });
+    };
+
+    const client = createGitHubAppUserClient({
+      credentials: many,
+      fetch: byToken,
+    });
+
+    expect(
+      (await client.listRepositories("user-1")).map((r) => r.fullName).sort(),
+    ).toEqual(["absolutejs/only", "alexkahndev/only"]);
+  });
 });
