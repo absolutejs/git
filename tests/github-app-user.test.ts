@@ -83,6 +83,7 @@ describe("GitHub App user client", () => {
         id: 23,
         installationId: 11,
         installationUrl: "https://github.com/settings/installations/11",
+        linkedAccountId: "octocat",
         private: true,
         repositorySelection: "selected",
         webUrl: "https://github.com/absolutejs/PAAS",

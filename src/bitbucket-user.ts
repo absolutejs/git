@@ -1,7 +1,6 @@
 import type {
   LinkedProviderCredentialFailureReport,
   LinkedProviderCredentialResolver,
-  ResolvedLinkedProviderCredential,
 } from "@absolutejs/linked-providers";
 import {
   BitbucketApiError,
@@ -10,6 +9,7 @@ import {
   type BitbucketRepository,
 } from "./bitbucket";
 import { GitIngestionError } from "./index";
+import { createLinkedIdentities } from "./linked-identities";
 
 type Fetch = (
   input: string | URL | Request,
@@ -24,6 +24,10 @@ type Fetch = (
  *  because Bitbucket numbers nothing — it is UUIDs all the way down. */
 export type BitbucketUserRepository = BitbucketRepository & {
   account: { id: string; login: string };
+  /** Which linked account this was reached through. Not the workspace above:
+   *  a customer may have authorized two Bitbucket accounts, and only the one
+   *  that can see a repository can clone it. */
+  linkedAccountId: string;
 };
 
 export class BitbucketUserCredentialUnavailableError extends GitIngestionError {}
@@ -46,12 +50,14 @@ const failureFor = (error: unknown): LinkedProviderCredentialFailureReport => {
 
 const withAccount = (
   repository: BitbucketRepository,
+  linkedAccountId: string,
 ): BitbucketUserRepository => ({
   ...repository,
   account: {
     id: repository.workspace.uuid,
     login: repository.workspace.slug,
   },
+  linkedAccountId,
 });
 
 export const createBitbucketUserClient = (options: {
@@ -63,68 +69,80 @@ export const createBitbucketUserClient = (options: {
   fetch?: Fetch;
   minTokenValidityMs?: number;
 }) => {
-  const credentialFor = async (ownerRef: string) => {
-    const credential = await options.credentials.resolveCredential({
-      connectorProvider: "bitbucket",
-      ownerRef,
-      purpose: "interactive_test",
-    });
-    if (!credential)
-      throw new BitbucketUserCredentialUnavailableError(
-        "A linked Bitbucket user credential is unavailable",
-      );
-
-    return credential;
-  };
-
-  const withToken = async <Result>(
-    ownerRef: string,
-    operation: (
-      accessToken: string,
-      credential: ResolvedLinkedProviderCredential,
-    ) => Promise<Result>,
-  ) => {
-    const credential = await credentialFor(ownerRef);
-    try {
-      const lease = await options.credentials.getAccessToken(credential, {
-        minValidityMs: options.minTokenValidityMs ?? 60_000,
-      });
-
-      return await operation(lease.accessToken, credential);
-    } catch (error) {
-      await options.credentials.reportFailure(credential, failureFor(error));
-      throw error;
-    }
+  const identities = createLinkedIdentities({
+    connectorProvider: "bitbucket",
+    credentials: options.credentials,
+    failureFor,
+    minTokenValidityMs: options.minTokenValidityMs ?? 60_000,
+    unavailable: (message) =>
+      new BitbucketUserCredentialUnavailableError(message),
+  });
+  const rest = {
+    ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
+    ...(options.fetch ? { fetch: options.fetch } : {}),
   };
 
   /** The owner's Bitbucket access token, refreshed when it is close to
    *  expiring. Cloning a private repository needs the raw token as a
-   *  Basic-auth password, with `x-token-auth` as the username. */
-  const getAccessToken = (ownerRef: string) =>
-    withToken(ownerRef, async (accessToken) => accessToken);
+   *  Basic-auth password, with `x-token-auth` as the username.
+   *
+   *  Naming an account picks that authorization; without one the most recent
+   *  is used, which is all a caller who stored no account can ask for. */
+  const getAccessToken = (ownerRef: string, externalAccountId?: string) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken) => accessToken,
+      externalAccountId,
+    );
 
+  const listForOne = (ownerRef: string, externalAccountId?: string) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken, credential) =>
+        (await listBitbucketRepositoriesForUser({ accessToken, ...rest })).map(
+          (repository) => withAccount(repository, credential.externalAccountId),
+        ),
+      externalAccountId,
+    );
+
+  /** Every repository this owner can reach, across every Bitbucket account
+   *  they have linked. */
   const listRepositories = (ownerRef: string) =>
-    withToken(ownerRef, async (accessToken) =>
-      (
-        await listBitbucketRepositoriesForUser({
-          accessToken,
-          ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
-          ...(options.fetch ? { fetch: options.fetch } : {}),
-        })
-      ).map(withAccount),
+    identities.across(ownerRef, listForOne, (repository) => repository.id);
+
+  const getForOne = (
+    ownerRef: string,
+    input: { fullName: string },
+    externalAccountId?: string,
+  ) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken, credential) =>
+        withAccount(
+          await getBitbucketRepository({
+            accessToken,
+            fullName: input.fullName,
+            ...rest,
+          }),
+          credential.externalAccountId,
+        ),
+      externalAccountId,
     );
 
-  const getRepository = (ownerRef: string, input: { fullName: string }) =>
-    withToken(ownerRef, async (accessToken) =>
-      withAccount(
-        await getBitbucketRepository({
-          accessToken,
-          ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
-          ...(options.fetch ? { fetch: options.fetch } : {}),
-          fullName: input.fullName,
-        }),
-      ),
-    );
+  const getRepository = (
+    ownerRef: string,
+    input: {
+      /** Which linked account to ask. Omitted, every one is asked and the
+       *  first that admits to the repository answers. */
+      externalAccountId?: string;
+      fullName: string;
+    },
+  ) =>
+    input.externalAccountId
+      ? getForOne(ownerRef, input, input.externalAccountId)
+      : identities.firstAnswering(ownerRef, (ref, accountId) =>
+          getForOne(ref, input, accountId),
+        );
 
   return { getAccessToken, getRepository, listRepositories };
 };

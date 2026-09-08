@@ -19,6 +19,10 @@ type Fetch = (
 export type GitHubAppUserRepository = GitHubAppRepository & {
   account: { id: number; login: string };
   installationId: number;
+  /** Which linked account this was reached through. Not the installation
+   *  account above: an installation on an organisation is reachable through
+   *  whichever member authorized, and only that account can list it again. */
+  linkedAccountId: string;
   /**
    * What the installation this repository came through was granted: every
    * repository on the account, or only the ones somebody chose.
@@ -115,7 +119,7 @@ export const createGitHubAppUserClient = (options: {
   const forOneIdentity = (ownerRef: string, bindingId?: string) =>
     withToken(
       ownerRef,
-      async (userAccessToken) => {
+      async (userAccessToken, credential) => {
         const installations = await listGitHubAppInstallationsForUser({
           ...(options.fetch ? { fetch: options.fetch } : {}),
           userAccessToken,
@@ -133,6 +137,7 @@ export const createGitHubAppUserClient = (options: {
               account: installation.account,
               installationId: installation.id,
               installationUrl: installation.installationUrl,
+              linkedAccountId: credential.externalAccountId,
               repositorySelection: installation.repositorySelection,
             })),
           ),

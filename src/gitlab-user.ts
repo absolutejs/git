@@ -1,9 +1,9 @@
 import type {
   LinkedProviderCredentialFailureReport,
   LinkedProviderCredentialResolver,
-  ResolvedLinkedProviderCredential,
 } from "@absolutejs/linked-providers";
 import { GitIngestionError } from "./index";
+import { createLinkedIdentities } from "./linked-identities";
 import {
   getGitLabProject,
   GitLabApiError,
@@ -23,6 +23,10 @@ type Fetch = (
  *  not have to know which host it is talking to. */
 export type GitLabUserRepository = GitLabRepository & {
   account: { id: number; login: string };
+  /** Which linked account this was reached through. Not the namespace above:
+   *  a customer may have authorized two GitLab accounts, and only the one
+   *  that can see a repository can clone it. */
+  linkedAccountId: string;
 };
 
 export class GitLabUserCredentialUnavailableError extends GitIngestionError {}
@@ -43,12 +47,16 @@ const failureFor = (error: unknown): LinkedProviderCredentialFailureReport => {
   };
 };
 
-const withAccount = (repository: GitLabRepository): GitLabUserRepository => ({
+const withAccount = (
+  repository: GitLabRepository,
+  linkedAccountId: string,
+): GitLabUserRepository => ({
   ...repository,
   account: {
     id: repository.namespace.id,
     login: repository.namespace.fullPath,
   },
+  linkedAccountId,
 });
 
 export const createGitLabUserClient = (options: {
@@ -60,72 +68,80 @@ export const createGitLabUserClient = (options: {
   fetch?: Fetch;
   minTokenValidityMs?: number;
 }) => {
-  const credentialFor = async (ownerRef: string) => {
-    const credential = await options.credentials.resolveCredential({
-      connectorProvider: "gitlab",
-      ownerRef,
-      purpose: "interactive_test",
-    });
-    if (!credential)
-      throw new GitLabUserCredentialUnavailableError(
-        "A linked GitLab user credential is unavailable",
-      );
-
-    return credential;
-  };
-
-  const withToken = async <Result>(
-    ownerRef: string,
-    operation: (
-      accessToken: string,
-      credential: ResolvedLinkedProviderCredential,
-    ) => Promise<Result>,
-  ) => {
-    const credential = await credentialFor(ownerRef);
-    try {
-      const lease = await options.credentials.getAccessToken(credential, {
-        minValidityMs: options.minTokenValidityMs ?? 60_000,
-      });
-
-      return await operation(lease.accessToken, credential);
-    } catch (error) {
-      await options.credentials.reportFailure(credential, failureFor(error));
-      throw error;
-    }
+  const identities = createLinkedIdentities({
+    connectorProvider: "gitlab",
+    credentials: options.credentials,
+    failureFor,
+    minTokenValidityMs: options.minTokenValidityMs ?? 60_000,
+    unavailable: (message) => new GitLabUserCredentialUnavailableError(message),
+  });
+  const rest = {
+    ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
+    ...(options.fetch ? { fetch: options.fetch } : {}),
   };
 
   /** The owner's GitLab access token, refreshed when it is close to expiring.
    *  Cloning a private project needs the raw token as a Basic-auth password
    *  (with `oauth2` as the username), which is not something this client can
-   *  do on the caller's behalf the way an API call would be. */
-  const getAccessToken = (ownerRef: string) =>
-    withToken(ownerRef, async (accessToken) => accessToken);
+   *  do on the caller's behalf the way an API call would be.
+   *
+   *  Naming an account picks that authorization; without one the most recent
+   *  is used, which is all a caller who stored no account can ask for. */
+  const getAccessToken = (ownerRef: string, externalAccountId?: string) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken) => accessToken,
+      externalAccountId,
+    );
 
+  const listForOne = (ownerRef: string, externalAccountId?: string) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken, credential) =>
+        (await listGitLabProjectsForUser({ accessToken, ...rest })).map(
+          (repository) => withAccount(repository, credential.externalAccountId),
+        ),
+      externalAccountId,
+    );
+
+  /** Every project this owner can reach, across every GitLab account they
+   *  have linked. */
   const listRepositories = (ownerRef: string) =>
-    withToken(ownerRef, async (accessToken) =>
-      (
-        await listGitLabProjectsForUser({
-          accessToken,
-          ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
-          ...(options.fetch ? { fetch: options.fetch } : {}),
-        })
-      ).map(withAccount),
+    identities.across(ownerRef, listForOne, (repository) => repository.id);
+
+  const getForOne = (
+    ownerRef: string,
+    input: { projectId: number | string },
+    externalAccountId?: string,
+  ) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken, credential) =>
+        withAccount(
+          await getGitLabProject({
+            accessToken,
+            projectId: input.projectId,
+            ...rest,
+          }),
+          credential.externalAccountId,
+        ),
+      externalAccountId,
     );
 
   const getRepository = (
     ownerRef: string,
-    input: { projectId: number | string },
+    input: {
+      /** Which linked account to ask. Omitted, every one is asked and the
+       *  first that admits to the project answers. */
+      externalAccountId?: string;
+      projectId: number | string;
+    },
   ) =>
-    withToken(ownerRef, async (accessToken) =>
-      withAccount(
-        await getGitLabProject({
-          accessToken,
-          ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
-          ...(options.fetch ? { fetch: options.fetch } : {}),
-          projectId: input.projectId,
-        }),
-      ),
-    );
+    input.externalAccountId
+      ? getForOne(ownerRef, input, input.externalAccountId)
+      : identities.firstAnswering(ownerRef, (ref, accountId) =>
+          getForOne(ref, input, accountId),
+        );
 
   return { getAccessToken, getRepository, listRepositories };
 };

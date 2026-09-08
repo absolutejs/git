@@ -1,7 +1,6 @@
 import type {
   LinkedProviderCredentialFailureReport,
   LinkedProviderCredentialResolver,
-  ResolvedLinkedProviderCredential,
 } from "@absolutejs/linked-providers";
 import {
   AzureDevOpsApiError,
@@ -10,6 +9,7 @@ import {
   type AzureDevOpsRepository,
 } from "./azure-devops";
 import { GitIngestionError } from "./index";
+import { createLinkedIdentities } from "./linked-identities";
 
 type Fetch = (
   input: string | URL | Request,
@@ -24,6 +24,10 @@ type Fetch = (
  *  projects share one organization, and it is already in `fullName`. */
 export type AzureDevOpsUserRepository = AzureDevOpsRepository & {
   account: { id: string; login: string };
+  /** Which linked account this was reached through. Not the organization
+   *  above: a customer may have authorized two Entra accounts, and only the
+   *  one that can see a repository can clone it. */
+  linkedAccountId: string;
 };
 
 export class AzureDevOpsUserCredentialUnavailableError extends GitIngestionError {}
@@ -46,9 +50,11 @@ const failureFor = (error: unknown): LinkedProviderCredentialFailureReport => {
 
 const withAccount = (
   repository: AzureDevOpsRepository,
+  linkedAccountId: string,
 ): AzureDevOpsUserRepository => ({
   ...repository,
   account: { id: repository.organization, login: repository.organization },
+  linkedAccountId,
 });
 
 export const createAzureDevOpsUserClient = (options: {
@@ -57,69 +63,82 @@ export const createAzureDevOpsUserClient = (options: {
   fetch?: Fetch;
   minTokenValidityMs?: number;
 }) => {
-  const connectorProvider = options.connectorProvider ?? "azure-devops";
-  const credentialFor = async (ownerRef: string) => {
-    const credential = await options.credentials.resolveCredential({
-      connectorProvider,
-      ownerRef,
-      purpose: "interactive_test",
-    });
-    if (!credential)
-      throw new AzureDevOpsUserCredentialUnavailableError(
-        "A linked Azure DevOps user credential is unavailable",
-      );
-
-    return credential;
-  };
-
-  const withToken = async <Result>(
-    ownerRef: string,
-    operation: (
-      accessToken: string,
-      credential: ResolvedLinkedProviderCredential,
-    ) => Promise<Result>,
-  ) => {
-    const credential = await credentialFor(ownerRef);
-    try {
-      /* An Entra access token lives an hour — short enough that a large
-       * clone can outlast one — so a generous validity window is asked for
-       * rather than the usual minute. */
-      const lease = await options.credentials.getAccessToken(credential, {
-        minValidityMs: options.minTokenValidityMs ?? 300_000,
-      });
-
-      return await operation(lease.accessToken, credential);
-    } catch (error) {
-      await options.credentials.reportFailure(credential, failureFor(error));
-      throw error;
-    }
-  };
-
+  const identities = createLinkedIdentities({
+    connectorProvider: options.connectorProvider ?? "azure-devops",
+    credentials: options.credentials,
+    failureFor,
+    /* An Entra access token lives an hour -- short enough that a large clone
+     * can outlast one -- so a generous validity window is asked for rather
+     * than the usual minute. */
+    minTokenValidityMs: options.minTokenValidityMs ?? 300_000,
+    unavailable: (message) =>
+      new AzureDevOpsUserCredentialUnavailableError(message),
+  });
   const rest = options.fetch ? { fetch: options.fetch } : {};
 
   /** The owner's access token. Azure DevOps takes it as a bearer header for
    *  a clone rather than as a Basic password, which is why callers ask for
-   *  the token rather than a username/token pair. */
-  const getAccessToken = (ownerRef: string) =>
-    withToken(ownerRef, async (accessToken) => accessToken);
+   *  the token rather than a username/token pair.
+   *
+   *  Naming an account picks that authorization; without one the most recent
+   *  is used, which is all a caller who stored no account can ask for. */
+  const getAccessToken = (ownerRef: string, externalAccountId?: string) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken) => accessToken,
+      externalAccountId,
+    );
 
+  const listForOne = (ownerRef: string, externalAccountId?: string) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken, credential) =>
+        (
+          await listAzureDevOpsRepositoriesForUser({ accessToken, ...rest })
+        ).map((repository) =>
+          withAccount(repository, credential.externalAccountId),
+        ),
+      externalAccountId,
+    );
+
+  /** Every repository this owner can reach, across every Azure DevOps account
+   *  they have linked. */
   const listRepositories = (ownerRef: string) =>
-    withToken(ownerRef, async (accessToken) =>
-      (await listAzureDevOpsRepositoriesForUser({ accessToken, ...rest })).map(
-        withAccount,
-      ),
+    identities.across(ownerRef, listForOne, (repository) => repository.id);
+
+  const getForOne = (
+    ownerRef: string,
+    input: { fullName: string },
+    externalAccountId?: string,
+  ) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken, credential) =>
+        withAccount(
+          await getAzureDevOpsRepository({
+            accessToken,
+            fullName: input.fullName,
+            ...rest,
+          }),
+          credential.externalAccountId,
+        ),
+      externalAccountId,
     );
 
-  const getRepository = (ownerRef: string, input: { fullName: string }) =>
-    withToken(ownerRef, async (accessToken) =>
-      withAccount(
-        await getAzureDevOpsRepository({
-          accessToken,
-          fullName: input.fullName,
-          ...rest,
-        }),
-      ),
-    );
+  const getRepository = (
+    ownerRef: string,
+    input: {
+      /** Which linked account to ask. Omitted, every one is asked and the
+       *  first that admits to the repository answers. */
+      externalAccountId?: string;
+      fullName: string;
+    },
+  ) =>
+    input.externalAccountId
+      ? getForOne(ownerRef, input, input.externalAccountId)
+      : identities.firstAnswering(ownerRef, (ref, accountId) =>
+          getForOne(ref, input, accountId),
+        );
 
   return { getAccessToken, getRepository, listRepositories };
 };

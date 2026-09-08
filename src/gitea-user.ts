@@ -1,7 +1,6 @@
 import type {
   LinkedProviderCredentialFailureReport,
   LinkedProviderCredentialResolver,
-  ResolvedLinkedProviderCredential,
 } from "@absolutejs/linked-providers";
 import {
   GiteaApiError,
@@ -11,6 +10,7 @@ import {
   type GiteaRepository,
 } from "./gitea";
 import { GitIngestionError } from "./index";
+import { createLinkedIdentities } from "./linked-identities";
 
 type Fetch = (
   input: string | URL | Request,
@@ -24,6 +24,10 @@ type Fetch = (
  *  know which host it is talking to. */
 export type GiteaUserRepository = GiteaRepository & {
   account: { id: number; login: string };
+  /** Which linked account this was reached through. Not the owner above: a
+   *  customer may have authorized two accounts on the same instance, and only
+   *  the one that can see a repository can clone it. */
+  linkedAccountId: string;
 };
 
 export class GiteaUserCredentialUnavailableError extends GitIngestionError {}
@@ -44,9 +48,13 @@ const failureFor = (error: unknown): LinkedProviderCredentialFailureReport => {
   };
 };
 
-const withAccount = (repository: GiteaRepository): GiteaUserRepository => ({
+const withAccount = (
+  repository: GiteaRepository,
+  linkedAccountId: string,
+): GiteaUserRepository => ({
   ...repository,
   account: { id: repository.owner.id, login: repository.owner.login },
+  linkedAccountId,
 });
 
 /**
@@ -68,76 +76,90 @@ export const createGiteaUserClient = (options: {
   fetch?: Fetch;
   minTokenValidityMs?: number;
 }) => {
-  const connectorProvider = options.connectorProvider ?? "gitea";
-  const credentialFor = async (ownerRef: string) => {
-    const credential = await options.credentials.resolveCredential({
-      connectorProvider,
-      ownerRef,
-      purpose: "interactive_test",
-    });
-    if (!credential)
-      throw new GiteaUserCredentialUnavailableError(
-        "A linked Gitea user credential is unavailable",
-      );
-
-    return credential;
-  };
-
-  const withToken = async <Result>(
-    ownerRef: string,
-    operation: (
-      accessToken: string,
-      credential: ResolvedLinkedProviderCredential,
-    ) => Promise<Result>,
-  ) => {
-    const credential = await credentialFor(ownerRef);
-    try {
-      const lease = await options.credentials.getAccessToken(credential, {
-        minValidityMs: options.minTokenValidityMs ?? 60_000,
-      });
-
-      return await operation(lease.accessToken, credential);
-    } catch (error) {
-      await options.credentials.reportFailure(credential, failureFor(error));
-      throw error;
-    }
-  };
-
+  const identities = createLinkedIdentities({
+    connectorProvider: options.connectorProvider ?? "gitea",
+    credentials: options.credentials,
+    failureFor,
+    minTokenValidityMs: options.minTokenValidityMs ?? 60_000,
+    unavailable: (message) => new GiteaUserCredentialUnavailableError(message),
+  });
   const rest = {
     baseUrl: options.baseUrl,
     ...(options.fetch ? { fetch: options.fetch } : {}),
   };
 
-  /** The owner's access token, refreshed when it is close to expiring. */
-  const getAccessToken = (ownerRef: string) =>
-    withToken(ownerRef, async (accessToken) => accessToken);
+  /** The owner's access token, refreshed when it is close to expiring.
+   *
+   *  Naming an account picks that authorization; without one the most recent
+   *  is used, which is all a caller who stored no account can ask for. */
+  const getAccessToken = (ownerRef: string, externalAccountId?: string) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken) => accessToken,
+      externalAccountId,
+    );
 
   /** The token and the login that has to accompany it: Gitea authenticates a
    *  clone with the account's own username beside the token, so neither half
    *  is enough alone. */
-  const getCloneCredential = (ownerRef: string) =>
-    withToken(ownerRef, async (accessToken) => ({
-      token: accessToken,
-      username: (await getGiteaUser({ accessToken, ...rest })).login,
-    }));
+  const getCloneCredential = (ownerRef: string, externalAccountId?: string) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken) => ({
+        token: accessToken,
+        username: (await getGiteaUser({ accessToken, ...rest })).login,
+      }),
+      externalAccountId,
+    );
 
+  const listForOne = (ownerRef: string, externalAccountId?: string) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken, credential) =>
+        (await listGiteaRepositoriesForUser({ accessToken, ...rest })).map(
+          (repository) => withAccount(repository, credential.externalAccountId),
+        ),
+      externalAccountId,
+    );
+
+  /** Every repository this owner can reach, across every account they have
+   *  linked on this instance. */
   const listRepositories = (ownerRef: string) =>
-    withToken(ownerRef, async (accessToken) =>
-      (await listGiteaRepositoriesForUser({ accessToken, ...rest })).map(
-        withAccount,
-      ),
+    identities.across(ownerRef, listForOne, (repository) => repository.id);
+
+  const getForOne = (
+    ownerRef: string,
+    input: { fullName: string },
+    externalAccountId?: string,
+  ) =>
+    identities.withToken(
+      ownerRef,
+      async (accessToken, credential) =>
+        withAccount(
+          await getGiteaRepository({
+            accessToken,
+            fullName: input.fullName,
+            ...rest,
+          }),
+          credential.externalAccountId,
+        ),
+      externalAccountId,
     );
 
-  const getRepository = (ownerRef: string, input: { fullName: string }) =>
-    withToken(ownerRef, async (accessToken) =>
-      withAccount(
-        await getGiteaRepository({
-          accessToken,
-          fullName: input.fullName,
-          ...rest,
-        }),
-      ),
-    );
+  const getRepository = (
+    ownerRef: string,
+    input: {
+      /** Which linked account to ask. Omitted, every one is asked and the
+       *  first that admits to the repository answers. */
+      externalAccountId?: string;
+      fullName: string;
+    },
+  ) =>
+    input.externalAccountId
+      ? getForOne(ownerRef, input, input.externalAccountId)
+      : identities.firstAnswering(ownerRef, (ref, accountId) =>
+          getForOne(ref, input, accountId),
+        );
 
   return {
     getAccessToken,
