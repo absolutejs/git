@@ -33,8 +33,9 @@ export type GitHubAppUserRepository = GitHubAppRepository & {
    * call.
    */
   repositorySelection: "all" | "selected";
-  /** Where the installation this came through is configured on GitHub. */
-  installationUrl: string;
+  /** Where the installation this came through is configured on GitHub, or
+   *  null when the response carried no link. */
+  installationUrl: string | null;
 };
 
 export class GitHubUserCredentialUnavailableError extends GitIngestionError {}

@@ -37,8 +37,14 @@ export type GitHubAppInstallation = {
    * account type: a personal installation lives under `/settings`, an
    * organisation's under `/organizations/<login>/settings`, and a caller
    * that guesses gets one of the two wrong.
+   *
+   * Null when the response omits it. It is a link and nothing more, so an
+   * installation that arrives without one is still an installation whose
+   * repositories can be listed and deployed -- refusing the whole listing
+   * over a missing link would cost the customer every repository on every
+   * account to save them one dead anchor.
    */
-  installationUrl: string;
+  installationUrl: string | null;
   repositorySelection: "all" | "selected";
 };
 
@@ -111,6 +117,10 @@ const string = (value: unknown, label: string) => {
     throw new GitIngestionError(`${label} is invalid`);
   return value;
 };
+
+/** For a field the caller only displays: absent is absent, not invalid. */
+const optionalString = (value: unknown) =>
+  typeof value === "string" && value.length > 0 ? value : null;
 
 const json = async (response: Response, label: string) => {
   if (!response.ok)
@@ -299,7 +309,7 @@ export const getGitHubAppInstallation = async (options: {
       login: string(account.login, "GitHub account login"),
     },
     id: integer(payload.id, "GitHub installation id"),
-    installationUrl: string(payload.html_url, "GitHub installation URL"),
+    installationUrl: optionalString(payload.html_url),
     repositorySelection: selection,
   };
 };
@@ -436,7 +446,7 @@ export const listGitHubAppInstallationsForUser = async (options: {
         login: string(account.login, "GitHub account login"),
       },
       id: integer(installation.id, "GitHub installation id"),
-      installationUrl: string(installation.html_url, "GitHub installation URL"),
+      installationUrl: optionalString(installation.html_url),
       repositorySelection: selection,
     };
   });

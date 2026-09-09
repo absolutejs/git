@@ -210,6 +210,39 @@ describe("GitHub App authentication", () => {
     expect(repositories[0]?.fullName).toBe("absolutejs/git");
   });
 
+  test("keeps every installation when one arrives without its link", async () => {
+    /* The configuration URL is a link and nothing more. Reading it strictly
+       meant one installation missing it threw, and the caller -- who asks for
+       installations only to list their repositories -- got none of them: every
+       repository on every account gone to save one dead anchor. */
+    const mockFetch = async () =>
+      Response.json({
+        installations: [
+          {
+            account: { id: 2, login: "absolutejs" },
+            html_url: "https://github.com/settings/installations/11",
+            id: 3,
+            repository_selection: "selected",
+          },
+          {
+            account: { id: 5, login: "acme" },
+            id: 4,
+            repository_selection: "all",
+          },
+        ],
+      });
+
+    const installations = await listGitHubAppInstallationsForUser({
+      fetch: mockFetch,
+      userAccessToken: "ghu_token",
+    });
+
+    expect(installations.map((installation) => installation.id)).toEqual([
+      3, 4,
+    ]);
+    expect(installations[1]?.installationUrl).toBeNull();
+  });
+
   test("binds App push events to installation and repository ids", () => {
     const body = JSON.stringify({
       after: "a".repeat(40),
