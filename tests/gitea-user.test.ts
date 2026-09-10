@@ -9,6 +9,18 @@ import {
   GiteaUserCredentialUnavailableError,
 } from "../src/gitea-user";
 
+/** The repositories out of a listing, for the assertions that only care about
+ *  those. The accounts a listing could not reach are checked where that is the
+ *  point. */
+const listing = async <Repository>(
+  client: {
+    listRepositories: (
+      ownerRef: string,
+    ) => Promise<{ repositories: Repository[] }>;
+  },
+  ownerRef: string,
+) => (await client.listRepositories(ownerRef)).repositories;
+
 const credential: ResolvedLinkedProviderCredential = {
   authProviderKey: "gitea",
   bindingId: "binding-1",
@@ -77,7 +89,7 @@ describe("createGiteaUserClient", () => {
       },
     });
 
-    const repositories = await client.listRepositories("user-1");
+    const repositories = await listing(client, "user-1");
 
     expect(repositories).toHaveLength(51);
     expect(seen).toHaveLength(2);
@@ -100,7 +112,7 @@ describe("createGiteaUserClient", () => {
       },
     });
 
-    await client.listRepositories("user-1");
+    await listing(client, "user-1");
 
     expect(calls).toBe(40);
   });
@@ -113,7 +125,7 @@ describe("createGiteaUserClient", () => {
         page([{ ...repository(1, "fresh", true), default_branch: "" }]),
     });
 
-    const [entry] = await client.listRepositories("user-1");
+    const [entry] = await listing(client, "user-1");
 
     expect(entry?.defaultBranch).toBeNull();
   });
@@ -146,7 +158,7 @@ describe("createGiteaUserClient", () => {
       fetch: async () => page([]),
     });
 
-    expect(await client.listRepositories("user-1")).toEqual([]);
+    expect(await listing(client, "user-1")).toEqual([]);
 
     const wrong = createGiteaUserClient({
       ...base,
@@ -207,7 +219,7 @@ describe("createGiteaUserClient", () => {
       },
     });
 
-    await client.listRepositories("user-1");
+    await listing(client, "user-1");
 
     expect(seen[0]).toStartWith("https://codeberg.org/api/v1/user/repos");
   });

@@ -8,6 +8,18 @@ import { createBitbucketUserClient } from "../src/bitbucket-user";
 import { createGiteaUserClient } from "../src/gitea-user";
 import { createGitLabUserClient } from "../src/gitlab-user";
 
+/** The repositories out of a listing, for the assertions that only care about
+ *  those. The accounts a listing could not reach are checked where that is the
+ *  point. */
+const listing = async <Repository>(
+  client: {
+    listRepositories: (
+      ownerRef: string,
+    ) => Promise<{ repositories: Repository[] }>;
+  },
+  ownerRef: string,
+) => (await client.listRepositories(ownerRef)).repositories;
+
 /**
  * Two accounts linked on one host.
  *
@@ -112,7 +124,7 @@ describe("listing across every linked account", () => {
       },
     });
 
-    const repositories = await client.listRepositories("user-1");
+    const repositories = await listing(client, "user-1");
 
     expect(
       repositories
@@ -223,11 +235,19 @@ describe("listing across every linked account", () => {
       },
     });
 
-    expect(
-      (await client.listRepositories("user-1")).map(
-        (repository) => repository.fullName,
-      ),
-    ).toEqual(["grace/app"]);
+    const result = await client.listRepositories("user-1");
+
+    expect(result.repositories.map((r) => r.fullName)).toEqual(["grace/app"]);
+    /* Named, not dropped. A list that is quietly short reads as repositories
+       that have gone missing, which is the failure this whole shape exists to
+       stop being invisible. */
+    expect(result.unreachable).toEqual([
+      {
+        externalAccountId: "42",
+        reason: expect.stringContaining("401"),
+        username: undefined,
+      },
+    ]);
   });
 
   test("raises when no account can be reached at all", async () => {

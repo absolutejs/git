@@ -4,6 +4,7 @@ import type {
   ResolvedLinkedProviderCredential,
 } from "@absolutejs/linked-providers";
 import { GitIngestionError } from "./index";
+import type { LinkedListing } from "./linked-identities";
 import {
   GitHubApiError,
   listGitHubAppInstallationsForUser,
@@ -165,9 +166,12 @@ export const createGitHubAppUserClient = (options: {
    * not lose the others, but a failure with no successes at all is raised
    * rather than passed off as an empty account.
    */
-  const listRepositories = async (ownerRef: string) => {
+  const listRepositories = async (
+    ownerRef: string,
+  ): Promise<LinkedListing<GitHubAppUserRepository>> => {
     const bindings = await githubBindings(ownerRef);
-    if (bindings.length <= 1) return forOneIdentity(ownerRef);
+    if (bindings.length <= 1)
+      return { repositories: await forOneIdentity(ownerRef), unreachable: [] };
     const settled = await Promise.allSettled(
       bindings.map((binding) => forOneIdentity(ownerRef, binding.id)),
     );
@@ -186,7 +190,27 @@ export const createGitHubAppUserClient = (options: {
     for (const repository of reached.flat())
       if (!seen.has(repository.id)) seen.set(repository.id, repository);
 
-    return [...seen.values()];
+    return {
+      repositories: [...seen.values()],
+      /* Named rather than dropped. An identity whose authorization has been
+       * revoked takes its account's repositories with it, and a list that is
+       * quietly short reads as repositories that have gone missing. */
+      unreachable: settled.flatMap((result, index) => {
+        const binding = bindings[index];
+        if (result.status !== "rejected" || !binding) return [];
+
+        return [
+          {
+            externalAccountId: binding.externalAccountId,
+            reason:
+              result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason),
+            username: binding.username,
+          },
+        ];
+      }),
+    };
   };
 
   const oneRepository = (

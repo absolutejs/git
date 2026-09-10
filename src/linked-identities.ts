@@ -18,6 +18,22 @@ import type {
  * not in how their identities are resolved.
  */
 
+/**
+ * A listing, and the accounts it could not include.
+ *
+ * One account failing is not a reason to show none of the others, and it is
+ * also not a reason to say nothing: half a list with no explanation reads as
+ * repositories that have gone missing.
+ */
+export type LinkedListing<Item> = {
+  repositories: Item[];
+  unreachable: {
+    externalAccountId: string;
+    reason: string;
+    username?: string;
+  }[];
+};
+
 type Options = {
   connectorProvider: string;
   credentials: LinkedProviderCredentialResolver;
@@ -86,7 +102,10 @@ export const createLinkedIdentities = (options: Options) => {
       .filter(
         (binding) => binding.connectorProvider === options.connectorProvider,
       )
-      .map((binding) => binding.externalAccountId);
+      .map((binding) => ({
+        externalAccountId: binding.externalAccountId,
+        username: binding.username,
+      }));
 
   const unreachable = (settled: PromiseSettledResult<unknown>[]) => {
     const [first] = settled;
@@ -110,11 +129,14 @@ export const createLinkedIdentities = (options: Options) => {
     ownerRef: string,
     forOne: (ownerRef: string, externalAccountId?: string) => Promise<Item[]>,
     idOf: (item: Item) => number | string,
-  ) => {
+  ): Promise<LinkedListing<Item>> => {
     const linked = await accounts(ownerRef);
-    if (linked.length <= 1) return forOne(ownerRef);
+    if (linked.length <= 1)
+      return { repositories: await forOne(ownerRef), unreachable: [] };
     const settled = await Promise.allSettled(
-      linked.map((externalAccountId) => forOne(ownerRef, externalAccountId)),
+      linked.map(({ externalAccountId }) =>
+        forOne(ownerRef, externalAccountId),
+      ),
     );
     const reached = settled.flatMap((result) =>
       result.status === "fulfilled" ? [result.value] : [],
@@ -126,7 +148,27 @@ export const createLinkedIdentities = (options: Options) => {
     for (const item of reached.flat())
       if (!seen.has(idOf(item))) seen.set(idOf(item), item);
 
-    return [...seen.values()];
+    return {
+      repositories: [...seen.values()],
+      /* The accounts that answered with nothing rather than an empty list.
+       * Dropping them silently is how somebody ends up looking at half their
+       * repositories with the page insisting everything is fine. */
+      unreachable: settled.flatMap((result, index) => {
+        const account = linked[index];
+        if (result.status !== "rejected" || !account) return [];
+
+        return [
+          {
+            externalAccountId: account.externalAccountId,
+            reason:
+              result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason),
+            username: account.username,
+          },
+        ];
+      }),
+    };
   };
 
   /**
@@ -145,7 +187,9 @@ export const createLinkedIdentities = (options: Options) => {
     const linked = await accounts(ownerRef);
     if (linked.length <= 1) return forOne(ownerRef);
     const settled = await Promise.allSettled(
-      linked.map((externalAccountId) => forOne(ownerRef, externalAccountId)),
+      linked.map(({ externalAccountId }) =>
+        forOne(ownerRef, externalAccountId),
+      ),
     );
     const answered = settled.find((result) => result.status === "fulfilled");
     if (answered && answered.status === "fulfilled") return answered.value;

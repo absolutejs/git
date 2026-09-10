@@ -9,6 +9,18 @@ import {
   createBitbucketUserClient,
 } from "../src/bitbucket-user";
 
+/** The repositories out of a listing, for the assertions that only care about
+ *  those. The accounts a listing could not reach are checked where that is the
+ *  point. */
+const listing = async <Repository>(
+  client: {
+    listRepositories: (
+      ownerRef: string,
+    ) => Promise<{ repositories: Repository[] }>;
+  },
+  ownerRef: string,
+) => (await client.listRepositories(ownerRef)).repositories;
+
 const credential: ResolvedLinkedProviderCredential = {
   authProviderKey: "bitbucket",
   bindingId: "binding-1",
@@ -88,7 +100,7 @@ describe("createBitbucketUserClient", () => {
       },
     });
 
-    const repositories = await client.listRepositories("user-1");
+    const repositories = await listing(client, "user-1");
 
     expect(repositories.map((entry) => entry.fullName)).toEqual([
       "acme/one",
@@ -145,7 +157,7 @@ describe("createBitbucketUserClient", () => {
       },
     });
 
-    await client.listRepositories("user-1");
+    await listing(client, "user-1");
 
     expect(calls).toBe(40);
   });
@@ -161,7 +173,7 @@ describe("createBitbucketUserClient", () => {
             }),
     });
 
-    const [entry] = await client.listRepositories("user-1");
+    const [entry] = await listing(client, "user-1");
 
     expect(entry?.defaultBranch).toBeNull();
   });
@@ -234,7 +246,7 @@ describe("createBitbucketUserClient", () => {
       },
     });
 
-    await client.listRepositories("user-1");
+    await listing(client, "user-1");
 
     expect(seen[0]).toStartWith(
       "https://bitbucket.internal.example/2.0/user/workspaces",
@@ -260,7 +272,7 @@ describe("createBitbucketUserClient", () => {
       },
     });
 
-    const repositories = await client.listRepositories("user-1");
+    const repositories = await listing(client, "user-1");
 
     expect(repositories.map((entry) => entry.fullName)).toEqual([
       "acme/one",

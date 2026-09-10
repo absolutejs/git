@@ -9,6 +9,18 @@ import {
   createAzureDevOpsUserClient,
 } from "../src/azure-devops-user";
 
+/** The repositories out of a listing, for the assertions that only care about
+ *  those. The accounts a listing could not reach are checked where that is the
+ *  point. */
+const listing = async <Repository>(
+  client: {
+    listRepositories: (
+      ownerRef: string,
+    ) => Promise<{ repositories: Repository[] }>;
+  },
+  ownerRef: string,
+) => (await client.listRepositories(ownerRef)).repositories;
+
 const credential: ResolvedLinkedProviderCredential = {
   authProviderKey: "azure-devops",
   bindingId: "binding-1",
@@ -75,7 +87,7 @@ describe("createAzureDevOpsUserClient", () => {
       fetch: host([repository()]),
     });
 
-    const [entry] = await client.listRepositories("user-1");
+    const [entry] = await listing(client, "user-1");
 
     expect(entry?.fullName).toBe("acme/Platform/Web");
     expect(entry?.account).toEqual({ id: "acme", login: "acme" });
@@ -88,7 +100,7 @@ describe("createAzureDevOpsUserClient", () => {
       fetch: host([repository()]),
     });
 
-    const [entry] = await client.listRepositories("user-1");
+    const [entry] = await listing(client, "user-1");
 
     expect(entry?.cloneUrl).toBe(
       "https://dev.azure.com/acme/Platform/_git/Web",
@@ -103,7 +115,7 @@ describe("createAzureDevOpsUserClient", () => {
       fetch: host([repository()]),
     });
 
-    const [entry] = await client.listRepositories("user-1");
+    const [entry] = await listing(client, "user-1");
 
     expect(entry?.defaultBranch).toBe("main");
   });
@@ -115,7 +127,7 @@ describe("createAzureDevOpsUserClient", () => {
       fetch: host([repository({ defaultBranch: undefined })]),
     });
 
-    const [entry] = await client.listRepositories("user-1");
+    const [entry] = await listing(client, "user-1");
 
     expect(entry?.defaultBranch).toBeNull();
   });
@@ -127,7 +139,7 @@ describe("createAzureDevOpsUserClient", () => {
       fetch: host([repository()]),
     });
 
-    const [entry] = await client.listRepositories("user-1");
+    const [entry] = await listing(client, "user-1");
 
     expect(entry?.webUrl).toBe("https://dev.azure.com/acme/Platform/_git/Web");
   });
@@ -146,7 +158,7 @@ describe("createAzureDevOpsUserClient", () => {
       ]),
     });
 
-    const entries = await client.listRepositories("user-1");
+    const entries = await listing(client, "user-1");
 
     expect(entries[0]?.private).toBeTrue();
     expect(entries[1]?.private).toBeFalse();
@@ -173,7 +185,7 @@ describe("createAzureDevOpsUserClient", () => {
       }) as unknown as typeof fetch,
     });
 
-    expect(await client.listRepositories("user-1")).toHaveLength(2);
+    expect(await listing(client, "user-1")).toHaveLength(2);
     // Profile, accounts, then one listing per organization — projects are
     // never enumerated, because one call spans all of them.
     expect(seen).toHaveLength(4);

@@ -9,6 +9,18 @@ import {
   GitLabUserCredentialUnavailableError,
 } from "../src/gitlab-user";
 
+/** The repositories out of a listing, for the assertions that only care about
+ *  those. The accounts a listing could not reach are checked where that is the
+ *  point. */
+const listing = async <Repository>(
+  client: {
+    listRepositories: (
+      ownerRef: string,
+    ) => Promise<{ repositories: Repository[] }>;
+  },
+  ownerRef: string,
+) => (await client.listRepositories(ownerRef)).repositories;
+
 const credential: ResolvedLinkedProviderCredential = {
   authProviderKey: "gitlab",
   bindingId: "binding-1",
@@ -75,7 +87,7 @@ describe("createGitLabUserClient", () => {
       },
     });
 
-    const repositories = await client.listRepositories("user-1");
+    const repositories = await listing(client, "user-1");
 
     expect(repositories.map((repository) => repository.fullName)).toEqual([
       "acme/one",
@@ -108,7 +120,7 @@ describe("createGitLabUserClient", () => {
       },
     });
 
-    const repositories = await client.listRepositories("user-1");
+    const repositories = await listing(client, "user-1");
 
     expect(requests).toBe(2);
     expect(repositories).toHaveLength(2);
@@ -123,7 +135,7 @@ describe("createGitLabUserClient", () => {
         }),
     });
 
-    const [repository] = await client.listRepositories("user-1");
+    const [repository] = await listing(client, "user-1");
 
     // Internal is not reachable by a clone URL alone, which is the only
     // distinction this flag exists to make.
@@ -144,7 +156,7 @@ describe("createGitLabUserClient", () => {
       },
     });
 
-    await client.listRepositories("user-1");
+    await listing(client, "user-1");
 
     expect(seen[0]?.startsWith("https://git.example.com/api/v4/projects")).toBe(
       true,

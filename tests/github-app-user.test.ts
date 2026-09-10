@@ -9,6 +9,18 @@ import {
   GitHubUserCredentialUnavailableError,
 } from "../src/github-app-user";
 
+/** The repositories out of a listing, for the assertions that only care about
+ *  those. The accounts a listing could not reach are checked where that is the
+ *  point. */
+const listing = async <Repository>(
+  client: {
+    listRepositories: (
+      ownerRef: string,
+    ) => Promise<{ repositories: Repository[] }>;
+  },
+  ownerRef: string,
+) => (await client.listRepositories(ownerRef)).repositories;
+
 const credential: ResolvedLinkedProviderCredential = {
   authProviderKey: "github",
   bindingId: "binding-1",
@@ -74,7 +86,7 @@ describe("GitHub App user client", () => {
       fetch: githubFetch,
     });
 
-    expect(await client.listRepositories("user-1")).toEqual([
+    expect(await listing(client, "user-1")).toEqual([
       {
         account: { id: 7, login: "absolutejs" },
         cloneUrl: "https://github.com/absolutejs/PAAS.git",
@@ -137,7 +149,7 @@ describe("GitHub App user client", () => {
     });
 
     expect(
-      (await client.listRepositories("user-1")).map((entry) => [
+      (await listing(client, "user-1")).map((entry) => [
         entry.fullName,
         entry.repositorySelection,
       ]),
@@ -262,7 +274,7 @@ describe("GitHub App user client", () => {
     });
 
     expect(
-      (await client.listRepositories("user-1")).map((r) => r.fullName).sort(),
+      (await listing(client, "user-1")).map((r) => r.fullName).sort(),
     ).toEqual(["absolutejs/only", "alexkahndev/only"]);
   });
 });
