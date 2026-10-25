@@ -258,6 +258,96 @@ export const updateGitHubCheckRun = async (options: {
   return parseCheckRun(await json(response, "GitHub check run update"));
 };
 
+/** One check run on a commit, as a deploy gate reads it. */
+export type GitHubCommitCheckRun = {
+  /** The GitHub App that owns the run (GitHub Actions, a CI service, ...). */
+  appId: number | null;
+  conclusion: GitHubCheckRunConclusion | null;
+  htmlUrl: string | null;
+  name: string;
+  status: GitHubCheckRunStatus;
+};
+
+/** Every check run on a commit, its latest attempt each, across all pages.
+ *  Needs an installation token with checks read access. */
+export const listGitHubCommitCheckRuns = async (options: {
+  fetch?: Fetch;
+  headSha: string;
+  installationToken: string;
+  repositoryFullName: string;
+}): Promise<GitHubCommitCheckRun[]> => {
+  if (!/^[0-9a-f]{40}$/.test(options.headSha))
+    throw new GitIngestionError("GitHub commit sha is invalid");
+  const entries = await listPages(
+    options.fetch ?? fetch,
+    (page) =>
+      `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/commits/${options.headSha}/check-runs?filter=latest&per_page=${PER_PAGE}&page=${page}`,
+    options.installationToken,
+    "check_runs",
+    "GitHub check run listing",
+  );
+  return entries.map((value) => {
+    const run = parseCheckRun(value);
+    const payload = object(value, "GitHub check run");
+    const app =
+      payload.app && typeof payload.app === "object"
+        ? (payload.app as Record<string, unknown>)
+        : null;
+    return {
+      appId:
+        app && Number.isSafeInteger(app.id) && Number(app.id) > 0
+          ? Number(app.id)
+          : null,
+      conclusion: run.conclusion,
+      htmlUrl: optionalString(payload.html_url),
+      name: string(payload.name, "GitHub check run name"),
+      status: run.status,
+    };
+  });
+};
+
+/** What a commit's checks say about deploying it:
+ *
+ *  - `none`: no check run yet (CI may not have started), so keep waiting.
+ *  - `pending`: at least one run has not finished.
+ *  - `passed`: every run finished as success, neutral or skipped.
+ *  - `failed`: every run finished and at least one did not pass.
+ *
+ *  `ignoreAppIds` leaves out runs a deployer posts itself, which would
+ *  otherwise wait on the very deploy they report. A failure is only final
+ *  once nothing is still running, since a re-run may still turn it green. */
+export type GitHubChecksVerdict =
+  | { state: "none" }
+  | { state: "pending"; waitingOn: string[] }
+  | { state: "passed"; passed: string[] }
+  | { failed: string[]; state: "failed" };
+
+const PASSING_CONCLUSIONS = new Set<GitHubCheckRunConclusion>([
+  "neutral",
+  "skipped",
+  "success",
+]);
+
+export const gitHubChecksVerdict = (
+  runs: readonly GitHubCommitCheckRun[],
+  options: { ignoreAppIds?: readonly number[] } = {},
+): GitHubChecksVerdict => {
+  const ignored = new Set(options.ignoreAppIds ?? []);
+  const counted = runs.filter(
+    (run) => run.appId === null || !ignored.has(run.appId),
+  );
+  if (counted.length === 0) return { state: "none" };
+  const running = counted.filter((run) => run.status !== "completed");
+  if (running.length > 0)
+    return { state: "pending", waitingOn: running.map((run) => run.name) };
+  const failed = counted.filter(
+    (run) => !run.conclusion || !PASSING_CONCLUSIONS.has(run.conclusion),
+  );
+  if (failed.length > 0)
+    return { failed: failed.map((run) => run.name), state: "failed" };
+  return { passed: counted.map((run) => run.name), state: "passed" };
+};
+
 export const createGitHubAppJwt = (options: {
   appId: string | number;
   now?: () => Date;
@@ -501,6 +591,51 @@ export const verifyGitHubAppPushWebhook = (options: {
   return {
     event,
     installationId: integer(installation.id, "GitHub installation id"),
+    repositoryId: integer(repository.id, "GitHub repository id"),
+  };
+};
+
+/** A check suite finished on a commit: the moment a deploy gated on the
+ *  commit's checks can look again. Only `completed` is accepted; GitHub sends
+ *  it to every App with checks access on the repository, whoever ran the
+ *  suite. */
+export const verifyGitHubAppCheckSuiteWebhook = (options: {
+  body: string | Uint8Array;
+  headers: HeaderSource;
+  now?: () => Date;
+  secret: string;
+}): {
+  deliveryId: string;
+  headSha: string;
+  installationId: number;
+  receivedAt: string;
+  repositoryFullName: string;
+  repositoryId: number;
+} => {
+  const { deliveryId, payload, receivedAt } = verifyGitHubWebhookEnvelope(
+    options,
+    "check_suite",
+  );
+  if (string(payload.action, "GitHub check suite action") !== "completed")
+    throw new GitIngestionError("GitHub check suite action is unsupported");
+  const installation = object(payload.installation, "GitHub App installation");
+  const repository = object(payload.repository, "GitHub repository");
+  const suite = object(payload.check_suite, "GitHub check suite");
+  const headSha = string(
+    suite.head_sha,
+    "GitHub check suite sha",
+  ).toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(headSha))
+    throw new GitIngestionError("GitHub check suite sha is invalid");
+  return {
+    deliveryId,
+    headSha,
+    installationId: integer(installation.id, "GitHub installation id"),
+    receivedAt,
+    repositoryFullName: string(
+      repository.full_name,
+      "GitHub repository full name",
+    ),
     repositoryId: integer(repository.id, "GitHub repository id"),
   };
 };
