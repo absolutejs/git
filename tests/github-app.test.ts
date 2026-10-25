@@ -5,10 +5,13 @@ import {
   createGitHubAppJwt,
   createGitHubCheckRun,
   getGitHubAppInstallation,
+  gitHubChecksVerdict,
+  listGitHubCommitCheckRuns,
   listGitHubAppInstallationsForUser,
   listGitHubAppRepositories,
   listGitHubAppRepositoriesForUser,
   updateGitHubCheckRun,
+  verifyGitHubAppCheckSuiteWebhook,
   verifyGitHubAppPullRequestWebhook,
   verifyGitHubAppPushWebhook,
 } from "../src/github-app";
@@ -371,5 +374,140 @@ describe("GitHub App authentication", () => {
     expect(listed.at(-1)?.fullName).toBe("absolutejs/r130");
     // Stops on the short page instead of asking for a third.
     expect(seen).toEqual(["1", "2"]);
+  });
+});
+
+describe("commit checks as a deploy gate", () => {
+  const sha = "c".repeat(40);
+  const signed = (body: string, secret: string, event = "check_suite") => ({
+    "x-github-delivery": "suite-delivery",
+    "x-github-event": event,
+    "x-hub-signature-256": `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`,
+  });
+
+  test("reads a completed check suite event", () => {
+    const secret = "a-secure-webhook-secret";
+    const body = JSON.stringify({
+      action: "completed",
+      check_suite: { head_sha: sha.toUpperCase() },
+      installation: { id: 3 },
+      repository: { full_name: "alexkahndev/closer-arcade", id: 4 },
+    });
+    expect(
+      verifyGitHubAppCheckSuiteWebhook({
+        body,
+        headers: signed(body, secret),
+        now: () => new Date("2026-10-25T12:00:00.000Z"),
+        secret,
+      }),
+    ).toEqual({
+      deliveryId: "suite-delivery",
+      headSha: sha,
+      installationId: 3,
+      receivedAt: "2026-10-25T12:00:00.000Z",
+      repositoryFullName: "alexkahndev/closer-arcade",
+      repositoryId: 4,
+    });
+  });
+
+  test("refuses a forged or unfinished check suite event", () => {
+    const secret = "a-secure-webhook-secret";
+    const body = JSON.stringify({
+      action: "completed",
+      check_suite: { head_sha: sha },
+      installation: { id: 3 },
+      repository: { full_name: "alexkahndev/closer-arcade", id: 4 },
+    });
+    expect(() =>
+      verifyGitHubAppCheckSuiteWebhook({
+        body,
+        headers: signed(body, "a-different-webhook-secret"),
+        secret,
+      }),
+    ).toThrow("signature is invalid");
+    const requested = JSON.stringify({ action: "requested" });
+    expect(() =>
+      verifyGitHubAppCheckSuiteWebhook({
+        body: requested,
+        headers: signed(requested, secret),
+        secret,
+      }),
+    ).toThrow("action is unsupported");
+  });
+
+  test("lists every page of a commit's latest check runs", async () => {
+    const urls: string[] = [];
+    const run = (id: number) => ({
+      app: { id: 15368 },
+      conclusion: "success",
+      html_url: `https://github.com/runs/${id}`,
+      id,
+      name: `job ${id}`,
+      status: "completed",
+    });
+    const runs = await listGitHubCommitCheckRuns({
+      fetch: (async (url: string) => {
+        urls.push(url);
+        const page = Number(new URL(url).searchParams.get("page"));
+        const count = page === 1 ? 100 : 2;
+        return Response.json({
+          check_runs: Array.from({ length: count }, (_, i) =>
+            run((page - 1) * 100 + i + 1),
+          ),
+        });
+      }) as unknown as typeof fetch,
+      headSha: sha,
+      installationToken: "installation-token",
+      repositoryFullName: "alexkahndev/closer-arcade",
+    });
+    expect(runs).toHaveLength(102);
+    expect(runs[0]).toEqual({
+      appId: 15368,
+      conclusion: "success",
+      htmlUrl: "https://github.com/runs/1",
+      name: "job 1",
+      status: "completed",
+    });
+    expect(urls[0]).toContain(`/commits/${sha}/check-runs?filter=latest`);
+  });
+
+  test("judges a commit only once every counted run has finished", () => {
+    const run = (
+      name: string,
+      status: "completed" | "in_progress" | "queued",
+      conclusion: "failure" | "neutral" | "skipped" | "success" | null,
+      appId = 15368,
+    ) => ({ appId, conclusion, htmlUrl: null, name, status });
+    const ours = 999;
+
+    expect(gitHubChecksVerdict([])).toEqual({ state: "none" });
+    expect(
+      gitHubChecksVerdict([run("preview", "queued", null, ours)], {
+        ignoreAppIds: [ours],
+      }),
+    ).toEqual({ state: "none" });
+    expect(
+      gitHubChecksVerdict([
+        run("unit", "completed", "failure"),
+        run("integration", "in_progress", null),
+      ]),
+    ).toEqual({ state: "pending", waitingOn: ["integration"] });
+    expect(
+      gitHubChecksVerdict(
+        [
+          run("unit", "completed", "success"),
+          run("lint", "completed", "neutral"),
+          run("docs", "completed", "skipped"),
+          run("preview", "queued", null, ours),
+        ],
+        { ignoreAppIds: [ours] },
+      ),
+    ).toEqual({ passed: ["unit", "lint", "docs"], state: "passed" });
+    expect(
+      gitHubChecksVerdict([
+        run("unit", "completed", "success"),
+        run("races", "completed", "failure"),
+      ]),
+    ).toEqual({ failed: ["races"], state: "failed" });
   });
 });
