@@ -5,6 +5,36 @@
 		{
 			"changes": [
 				{
+					"detail": "createGitHubAppInstallationToken takes permissions, so a write is asked for only by the call that writes; getGitHubAppInstallation and listGitHubAppInstallationsForUser report the permissions an installation has accepted; findGitHubPullRequest, getGitHubPullRequest, createGitHubPullRequest, updateGitHubPullRequest and mergeGitHubPullRequest manage a branch's pull request, and a merge goes through GitHub, so the repository's branch protection and required checks decide (GitHubMergeRefusedError on 405 or 409).",
+					"kind": "added",
+					"summary": "Send work to GitHub: scoped write tokens and pull requests",
+					"symbols": [
+						"findGitHubPullRequest",
+						"getGitHubPullRequest",
+						"createGitHubPullRequest",
+						"updateGitHubPullRequest",
+						"mergeGitHubPullRequest",
+						"GitHubMergeRefusedError",
+						"GitHubPullRequest",
+						"GitHubAppTokenPermissions"
+					]
+				},
+				{
+					"detail": "GitHubAppInstallation gains permissions, what the installation has accepted (an App's new permissions reach an installation only once its owner accepts them). createGitHubAppInstallationToken takes an optional permissions to narrow the token; without it nothing changes.",
+					"kind": "changed",
+					"summary": "Installations report their accepted permissions; tokens can be narrowed",
+					"symbols": [
+						"GitHubAppInstallation",
+						"createGitHubAppInstallationToken"
+					]
+				}
+			],
+			"date": "2026-11-09",
+			"version": "0.20.0"
+		},
+		{
+			"changes": [
+				{
 					"detail": "verifyGitHubAppCheckSuiteWebhook reads a signed check_suite completed event; listGitHubCommitCheckRuns lists a commit's latest check runs across every page with the App that owns each; gitHubChecksVerdict says whether they are none, pending, passed or failed, leaving out runs a deployer posts itself.",
 					"kind": "added",
 					"summary": "Gate a deploy on a commit's GitHub checks",

@@ -45,8 +45,20 @@ export type GitHubAppInstallation = {
    * account to save them one dead anchor.
    */
   installationUrl: string | null;
+  /**
+   * What this installation has accepted, e.g. `{ contents: "read" }`. An
+   * App's new permissions reach an installation only once its owner accepts
+   * them, so a caller about to push checks this rather than the App's own
+   * settings, and can tell the person who has to accept.
+   */
+  permissions: Record<string, "read" | "write">;
   repositorySelection: "all" | "selected";
 };
+
+/** The permissions a token may carry, never more than the installation has. */
+export type GitHubAppTokenPermissions = Partial<
+  Record<"checks" | "contents" | "metadata" | "pull_requests", "read" | "write">
+>;
 
 export type GitHubAppRepository = {
   cloneUrl: string;
@@ -140,6 +152,14 @@ const githubHeaders = (token: string) => ({
   authorization: `Bearer ${token}`,
   "x-github-api-version": API_VERSION,
 });
+
+const parsePermissions = (value: unknown) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const permissions: Record<string, "read" | "write"> = {};
+  for (const [name, level] of Object.entries(value))
+    if (level === "read" || level === "write") permissions[name] = level;
+  return permissions;
+};
 
 const repositoryPath = (fullName: string) => {
   const parts = fullName.split("/");
@@ -400,6 +420,7 @@ export const getGitHubAppInstallation = async (options: {
     },
     id: integer(payload.id, "GitHub installation id"),
     installationUrl: optionalString(payload.html_url),
+    permissions: parsePermissions(payload.permissions),
     repositorySelection: selection,
   };
 };
@@ -408,14 +429,21 @@ export const createGitHubAppInstallationToken = async (options: {
   appJwt: string;
   fetch?: Fetch;
   installationId: number;
+  /** Narrows the token to these permissions (least privilege): a write
+   *  is asked for only by the call that writes. Omitted, the token carries
+   *  everything the installation has accepted. */
+  permissions?: GitHubAppTokenPermissions;
   repositoryIds?: readonly number[];
 }): Promise<GitHubAppInstallationToken> => {
   const response = await (options.fetch ?? fetch)(
     `https://api.github.com/app/installations/${options.installationId}/access_tokens`,
     {
-      body: JSON.stringify(
-        options.repositoryIds ? { repository_ids: options.repositoryIds } : {},
-      ),
+      body: JSON.stringify({
+        ...(options.permissions ? { permissions: options.permissions } : {}),
+        ...(options.repositoryIds
+          ? { repository_ids: options.repositoryIds }
+          : {}),
+      }),
       headers: {
         ...githubHeaders(options.appJwt),
         "content-type": "application/json",
@@ -537,6 +565,7 @@ export const listGitHubAppInstallationsForUser = async (options: {
       },
       id: integer(installation.id, "GitHub installation id"),
       installationUrl: optionalString(installation.html_url),
+      permissions: parsePermissions(installation.permissions),
       repositorySelection: selection,
     };
   });
@@ -707,4 +736,205 @@ export const verifyGitHubAppPullRequestWebhook = (options: {
     installationId: integer(installation.id, "GitHub installation id"),
     repositoryId: integer(repositoryPayload.id, "GitHub repository id"),
   };
+};
+
+/** A pull request, as Studio's "Send to GitHub" tracks one. */
+export type GitHubPullRequest = {
+  baseRef: string;
+  draft: boolean;
+  headRef: string;
+  headSha: string;
+  htmlUrl: string;
+  merged: boolean;
+  /** Null while GitHub is still computing it. */
+  mergeable: boolean | null;
+  number: number;
+  state: "closed" | "open";
+  title: string;
+};
+
+const parsePullRequest = (value: unknown): GitHubPullRequest => {
+  const payload = object(value, "GitHub pull request");
+  const head = object(payload.head, "GitHub pull request head");
+  const base = object(payload.base, "GitHub pull request base");
+  const state = string(payload.state, "GitHub pull request state");
+  if (state !== "open" && state !== "closed")
+    throw new GitIngestionError("GitHub pull request state is invalid");
+  return {
+    baseRef: string(base.ref, "GitHub pull request base ref"),
+    draft: payload.draft === true,
+    headRef: string(head.ref, "GitHub pull request head ref"),
+    headSha: string(head.sha, "GitHub pull request head SHA"),
+    htmlUrl: string(payload.html_url, "GitHub pull request URL"),
+    merged: payload.merged === true || typeof payload.merged_at === "string",
+    mergeable:
+      typeof payload.mergeable === "boolean" ? payload.mergeable : null,
+    number: integer(payload.number, "GitHub pull request number"),
+    state,
+    title: typeof payload.title === "string" ? payload.title : "",
+  };
+};
+
+const branchName = (value: string, label: string) => {
+  if (
+    value.length === 0 ||
+    value.length > 255 ||
+    /[\s~^:?*\[\\]|\.\.|@\{|^\/|\/$|\.lock$/.test(value)
+  )
+    throw new GitIngestionError(`${label} is invalid`);
+  return value;
+};
+
+/** The open pull request from `head` (a branch in the same repository) into
+ *  `base`, if there is one. */
+export const findGitHubPullRequest = async (options: {
+  base: string;
+  fetch?: Fetch;
+  head: string;
+  installationToken: string;
+  repositoryFullName: string;
+}): Promise<GitHubPullRequest | null> => {
+  const owner = options.repositoryFullName.split("/")[0] ?? "";
+  const query = new URLSearchParams({
+    base: branchName(options.base, "GitHub pull request base"),
+    head: `${owner}:${branchName(options.head, "GitHub pull request head")}`,
+    state: "open",
+  });
+  const response = await (options.fetch ?? fetch)(
+    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/pulls?${query}`,
+    { headers: githubHeaders(options.installationToken) },
+  );
+  const payload = await json(response, "GitHub pull request lookup");
+  if (!Array.isArray(payload))
+    throw new GitIngestionError("GitHub pull request lookup is invalid");
+  return payload.length > 0 ? parsePullRequest(payload[0]) : null;
+};
+
+export const getGitHubPullRequest = async (options: {
+  fetch?: Fetch;
+  installationToken: string;
+  number: number;
+  repositoryFullName: string;
+}): Promise<GitHubPullRequest> => {
+  const response = await (options.fetch ?? fetch)(
+    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/pulls/${integer(options.number, "GitHub pull request number")}`,
+    { headers: githubHeaders(options.installationToken) },
+  );
+  return parsePullRequest(await json(response, "GitHub pull request read"));
+};
+
+export const createGitHubPullRequest = async (options: {
+  base: string;
+  body?: string;
+  draft?: boolean;
+  fetch?: Fetch;
+  head: string;
+  installationToken: string;
+  repositoryFullName: string;
+  title: string;
+}): Promise<GitHubPullRequest> => {
+  const response = await (options.fetch ?? fetch)(
+    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/pulls`,
+    {
+      body: JSON.stringify({
+        base: branchName(options.base, "GitHub pull request base"),
+        ...(options.body ? { body: options.body } : {}),
+        draft: options.draft === true,
+        head: branchName(options.head, "GitHub pull request head"),
+        title: string(options.title, "GitHub pull request title"),
+      }),
+      headers: {
+        ...githubHeaders(options.installationToken),
+        "content-type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+  return parsePullRequest(await json(response, "GitHub pull request creation"));
+};
+
+export const updateGitHubPullRequest = async (options: {
+  body?: string;
+  fetch?: Fetch;
+  installationToken: string;
+  number: number;
+  repositoryFullName: string;
+  title?: string;
+}): Promise<GitHubPullRequest> => {
+  const response = await (options.fetch ?? fetch)(
+    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/pulls/${integer(options.number, "GitHub pull request number")}`,
+    {
+      body: JSON.stringify({
+        ...(options.body === undefined ? {} : { body: options.body }),
+        ...(options.title === undefined
+          ? {}
+          : { title: string(options.title, "GitHub pull request title") }),
+      }),
+      headers: {
+        ...githubHeaders(options.installationToken),
+        "content-type": "application/json",
+      },
+      method: "PATCH",
+    },
+  );
+  return parsePullRequest(await json(response, "GitHub pull request update"));
+};
+
+/** Why GitHub refused a merge: its branch protection or required checks
+ *  (405), or a head that moved since `sha` was read (409). */
+export class GitHubMergeRefusedError extends GitIngestionError {
+  constructor(
+    message: string,
+    readonly status: 405 | 409,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Merges a pull request through GitHub, so the repository's branch protection
+ * and required checks decide, never the caller. `sha` is the head the caller
+ * reviewed: GitHub refuses the merge if the branch has moved since.
+ */
+export const mergeGitHubPullRequest = async (options: {
+  commitTitle?: string;
+  fetch?: Fetch;
+  installationToken: string;
+  method?: "merge" | "rebase" | "squash";
+  number: number;
+  repositoryFullName: string;
+  sha: string;
+}): Promise<{ sha: string }> => {
+  const response = await (options.fetch ?? fetch)(
+    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/pulls/${integer(options.number, "GitHub pull request number")}/merge`,
+    {
+      body: JSON.stringify({
+        ...(options.commitTitle ? { commit_title: options.commitTitle } : {}),
+        merge_method: options.method ?? "squash",
+        sha: string(options.sha, "GitHub pull request head SHA"),
+      }),
+      headers: {
+        ...githubHeaders(options.installationToken),
+        "content-type": "application/json",
+      },
+      method: "PUT",
+    },
+  );
+  if (response.status === 405 || response.status === 409) {
+    const reason = await response
+      .json()
+      .then((body) =>
+        optionalString(object(body, "GitHub merge refusal").message),
+      )
+      .catch(() => null);
+    throw new GitHubMergeRefusedError(
+      reason ?? "GitHub refused the merge",
+      response.status,
+    );
+  }
+  const payload = object(
+    await json(response, "GitHub pull request merge"),
+    "GitHub pull request merge",
+  );
+  return { sha: string(payload.sha, "GitHub merge commit SHA") };
 };
