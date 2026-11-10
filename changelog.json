@@ -5,6 +5,21 @@
 		{
 			"changes": [
 				{
+					"detail": "markGitHubPullRequestReady marks a draft pull request ready for review through GraphQL's markPullRequestReadyForReview (REST can't change a pull request's draft state), with the pull request's new nodeId; GraphQL errors are thrown with GitHub's message.",
+					"kind": "added",
+					"summary": "Mark a draft pull request ready for review",
+					"symbols": [
+						"markGitHubPullRequestReady",
+						"GitHubPullRequest"
+					]
+				}
+			],
+			"date": "2026-11-10",
+			"version": "0.21.0"
+		},
+		{
+			"changes": [
+				{
 					"detail": "createGitHubAppInstallationToken takes permissions, so a write is asked for only by the call that writes; getGitHubAppInstallation and listGitHubAppInstallationsForUser report the permissions an installation has accepted; findGitHubPullRequest, getGitHubPullRequest, createGitHubPullRequest, updateGitHubPullRequest and mergeGitHubPullRequest manage a branch's pull request, and a merge goes through GitHub, so the repository's branch protection and required checks decide (GitHubMergeRefusedError on 405 or 409).",
 					"kind": "added",
 					"summary": "Send work to GitHub: scoped write tokens and pull requests",

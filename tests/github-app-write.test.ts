@@ -5,6 +5,7 @@ import {
   findGitHubPullRequest,
   getGitHubAppInstallation,
   GitHubMergeRefusedError,
+  markGitHubPullRequestReady,
   mergeGitHubPullRequest,
   updateGitHubPullRequest,
 } from "../src/github-app";
@@ -34,6 +35,7 @@ const pullRequest = (overrides: Record<string, unknown> = {}) => ({
   html_url: "https://github.com/absolutejs/app/pull/7",
   mergeable: true,
   merged: false,
+  node_id: "PR_kwDOAbc123",
   number: 7,
   state: "open",
   title: "Checkout copy",
@@ -176,5 +178,49 @@ describe("GitHub App writes", () => {
     await expect(
       mergeGitHubPullRequest({ ...options, fetch: moved.fetch }),
     ).rejects.toMatchObject({ status: 409 });
+  });
+
+  test("marks a draft ready for review through GraphQL, by its node id", async () => {
+    const { fetch, seen } = recorder([
+      {
+        body: {
+          data: {
+            markPullRequestReadyForReview: { pullRequest: { isDraft: false } },
+          },
+        },
+      },
+      { body: { errors: [{ message: "Pull request is not a draft" }] } },
+    ]);
+    expect(
+      await markGitHubPullRequestReady({
+        fetch,
+        installationToken: "ghs_write",
+        nodeId: "PR_kwDOAbc123",
+      }),
+    ).toEqual({ draft: false });
+    expect(seen[0]?.url).toBe("https://api.github.com/graphql");
+    expect(seen[0]?.body).toMatchObject({ variables: { id: "PR_kwDOAbc123" } });
+    await expect(
+      markGitHubPullRequestReady({
+        fetch,
+        installationToken: "ghs_write",
+        nodeId: "PR_kwDOAbc123",
+      }),
+    ).rejects.toThrow(
+      "GitHub refused ready for review: Pull request is not a draft",
+    );
+  });
+
+  test("reads a pull request's node id", async () => {
+    const { fetch } = recorder([{ body: pullRequest() }]);
+    const opened = await createGitHubPullRequest({
+      base: "main",
+      fetch,
+      head: "studio/x",
+      installationToken: "t",
+      repositoryFullName: "absolutejs/app",
+      title: "x",
+    });
+    expect(opened.nodeId).toBe("PR_kwDOAbc123");
   });
 });
