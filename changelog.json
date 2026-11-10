@@ -5,6 +5,22 @@
 		{
 			"changes": [
 				{
+					"detail": "Each entry point was bundled with its own copy of the package's shared code, so an error thrown by one entry point (GitIngestionError from @absolutejs/git/github-app, say) was never instanceof the class exported by another (@absolutejs/git). Consumers' error handling missed every such error. The build now splits shared code into one chunk.",
+					"kind": "fixed",
+					"summary": "Errors are the same class whichever entry point threw them",
+					"symbols": [
+						"GitIngestionError",
+						"GitAuthorizationError",
+						"GitHubApiError"
+					]
+				}
+			],
+			"date": "2026-11-10",
+			"version": "0.22.1"
+		},
+		{
+			"changes": [
+				{
 					"detail": "listGitHubBranchRules reads the rules every active ruleset applies to a branch, which need not exist yet, with Metadata read only. getGitHubRepositoryMergeSettings reads which merge methods a repository allows, null where GitHub hides a field.",
 					"kind": "added",
 					"summary": "Read what a repository's GitHub settings allow",
