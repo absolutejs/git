@@ -748,6 +748,8 @@ export type GitHubPullRequest = {
   merged: boolean;
   /** Null while GitHub is still computing it. */
   mergeable: boolean | null;
+  /** GraphQL id, for what only GraphQL can do (marking ready for review). */
+  nodeId: string | null;
   number: number;
   state: "closed" | "open";
   title: string;
@@ -769,6 +771,7 @@ const parsePullRequest = (value: unknown): GitHubPullRequest => {
     merged: payload.merged === true || typeof payload.merged_at === "string",
     mergeable:
       typeof payload.mergeable === "boolean" ? payload.mergeable : null,
+    nodeId: optionalString(payload.node_id),
     number: integer(payload.number, "GitHub pull request number"),
     state,
     title: typeof payload.title === "string" ? payload.title : "",
@@ -937,4 +940,54 @@ export const mergeGitHubPullRequest = async (options: {
     "GitHub pull request merge",
   );
   return { sha: string(payload.sha, "GitHub merge commit SHA") };
+};
+
+/**
+ * Marks a draft pull request ready for review. REST can't change a pull
+ * request's draft state; GraphQL's markPullRequestReadyForReview can, with the
+ * pull request's node id. A pull request that is already ready stays ready.
+ */
+export const markGitHubPullRequestReady = async (options: {
+  fetch?: Fetch;
+  installationToken: string;
+  nodeId: string;
+}): Promise<{ draft: boolean }> => {
+  const response = await (options.fetch ?? fetch)(
+    "https://api.github.com/graphql",
+    {
+      body: JSON.stringify({
+        query:
+          "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }",
+        variables: {
+          id: string(options.nodeId, "GitHub pull request node id"),
+        },
+      }),
+      headers: {
+        ...githubHeaders(options.installationToken),
+        "content-type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+  const payload = object(
+    await json(response, "GitHub ready for review"),
+    "GitHub ready for review",
+  );
+  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    const [first] = payload.errors;
+    const message = optionalString(
+      object(first, "GitHub GraphQL error").message,
+    );
+    throw new GitIngestionError(
+      `GitHub refused ready for review: ${message ?? "unknown error"}`,
+    );
+  }
+  const data = object(payload.data, "GitHub ready for review data");
+  const mutation = object(
+    data.markPullRequestReadyForReview,
+    "GitHub ready for review result",
+  );
+  const pullRequest = object(mutation.pullRequest, "GitHub pull request");
+
+  return { draft: pullRequest.isDraft === true };
 };
