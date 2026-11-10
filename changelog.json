@@ -5,6 +5,23 @@
 		{
 			"changes": [
 				{
+					"detail": "listGitHubBranchRules reads the rules every active ruleset applies to a branch, which need not exist yet, with Metadata read only. getGitHubRepositoryMergeSettings reads which merge methods a repository allows, null where GitHub hides a field.",
+					"kind": "added",
+					"summary": "Read what a repository's GitHub settings allow",
+					"symbols": [
+						"listGitHubBranchRules",
+						"getGitHubRepositoryMergeSettings",
+						"GitHubBranchRule",
+						"GitHubRepositoryMergeSettings"
+					]
+				}
+			],
+			"date": "2026-11-10",
+			"version": "0.22.0"
+		},
+		{
+			"changes": [
+				{
 					"detail": "markGitHubPullRequestReady marks a draft pull request ready for review through GraphQL's markPullRequestReadyForReview (REST can't change a pull request's draft state), with the pull request's new nodeId; GraphQL errors are thrown with GitHub's message.",
 					"kind": "added",
 					"summary": "Mark a draft pull request ready for review",

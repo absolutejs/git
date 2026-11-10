@@ -991,3 +991,84 @@ export const markGitHubPullRequestReady = async (options: {
 
   return { draft: pullRequest.isDraft === true };
 };
+
+/** One rule GitHub applies to a branch, from any ruleset that targets it. */
+export type GitHubBranchRule = {
+  parameters: Record<string, unknown>;
+  type: string;
+};
+
+/**
+ * The rules that apply to `branch`, whether or not the branch exists yet, from
+ * every active ruleset (repository and organization) that targets it. Needs
+ * only Metadata read. Classic branch protection is not included: GitHub only
+ * shows it with Administration read.
+ */
+export const listGitHubBranchRules = async (options: {
+  branch: string;
+  fetch?: Fetch;
+  installationToken: string;
+  repositoryFullName: string;
+}): Promise<GitHubBranchRule[]> => {
+  const branch = branchName(options.branch, "GitHub branch")
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/");
+  const rules: GitHubBranchRule[] = [];
+  const PAGE_SIZE = 100;
+  for (let page = 1; ; page += 1) {
+    const response = await (options.fetch ?? fetch)(
+      `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/rules/branches/${branch}?per_page=${PAGE_SIZE}&page=${page}`,
+      { headers: githubHeaders(options.installationToken) },
+    );
+    const payload = await json(response, "GitHub branch rules");
+    if (!Array.isArray(payload))
+      throw new GitIngestionError("GitHub branch rules are invalid");
+    for (const entry of payload) {
+      const rule = object(entry, "GitHub branch rule");
+      rules.push({
+        parameters:
+          rule.parameters &&
+          typeof rule.parameters === "object" &&
+          !Array.isArray(rule.parameters)
+            ? (rule.parameters as Record<string, unknown>)
+            : {},
+        type: string(rule.type, "GitHub branch rule type"),
+      });
+    }
+    if (payload.length < PAGE_SIZE) return rules;
+  }
+};
+
+/** How a repository lets pull requests merge. A field GitHub didn't return
+ *  (it hides them from tokens without push access) is null: unknown. */
+export type GitHubRepositoryMergeSettings = {
+  allowMergeCommit: boolean | null;
+  allowRebaseMerge: boolean | null;
+  allowSquashMerge: boolean | null;
+  archived: boolean;
+  defaultBranch: string;
+};
+
+export const getGitHubRepositoryMergeSettings = async (options: {
+  fetch?: Fetch;
+  installationToken: string;
+  repositoryFullName: string;
+}): Promise<GitHubRepositoryMergeSettings> => {
+  const response = await (options.fetch ?? fetch)(
+    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}`,
+    { headers: githubHeaders(options.installationToken) },
+  );
+  const payload = object(
+    await json(response, "GitHub repository read"),
+    "GitHub repository",
+  );
+  const flag = (value: unknown) => (typeof value === "boolean" ? value : null);
+  return {
+    allowMergeCommit: flag(payload.allow_merge_commit),
+    allowRebaseMerge: flag(payload.allow_rebase_merge),
+    allowSquashMerge: flag(payload.allow_squash_merge),
+    archived: payload.archived === true,
+    defaultBranch: string(payload.default_branch, "GitHub default branch"),
+  };
+};
