@@ -748,6 +748,9 @@ export type GitHubPullRequest = {
   merged: boolean;
   /** Null while GitHub is still computing it. */
   mergeable: boolean | null;
+  /** The commit the merge made on the base branch (a squash, a merge
+   *  commit, or a rebase's last commit); null until it is merged. */
+  mergeCommitSha: string | null;
   /** GraphQL id, for what only GraphQL can do (marking ready for review). */
   nodeId: string | null;
   number: number;
@@ -771,6 +774,10 @@ const parsePullRequest = (value: unknown): GitHubPullRequest => {
     merged: payload.merged === true || typeof payload.merged_at === "string",
     mergeable:
       typeof payload.mergeable === "boolean" ? payload.mergeable : null,
+    mergeCommitSha:
+      payload.merged === true || typeof payload.merged_at === "string"
+        ? optionalString(payload.merge_commit_sha)
+        : null,
     nodeId: optionalString(payload.node_id),
     number: integer(payload.number, "GitHub pull request number"),
     state,
