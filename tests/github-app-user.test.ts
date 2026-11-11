@@ -278,3 +278,54 @@ describe("GitHub App user client", () => {
     ).toEqual(["absolutejs/only", "alexkahndev/only"]);
   });
 });
+
+describe("acting as the person", () => {
+  test("opens a pull request and reviews with the person's own token", async () => {
+    const seen: Array<{ token: string | null; url: string }> = [];
+    const asPerson = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      seen.push({
+        token: new Headers(init?.headers).get("authorization"),
+        url: String(input),
+      });
+      if (String(input).endsWith("/pulls"))
+        return Response.json({
+          base: { ref: "main" },
+          draft: true,
+          head: { ref: "studio/dana", sha: "b".repeat(40) },
+          html_url: "https://github.com/absolutejs/app/pull/9",
+          node_id: "PR_9",
+          number: 9,
+          state: "open",
+          title: "Dana's change",
+        });
+      return Response.json({ id: 3, state: "APPROVED" });
+    };
+    const client = createGitHubAppUserClient({
+      credentials: resolver(),
+      fetch: asPerson,
+    });
+    const opened = await client.createPullRequest("user-1", {
+      base: "main",
+      draft: true,
+      head: "studio/dana",
+      repositoryFullName: "absolutejs/app",
+      title: "Dana's change",
+    });
+    expect(opened.number).toBe(9);
+    await client.reviewPullRequest("user-1", {
+      event: "APPROVE",
+      number: 9,
+      repositoryFullName: "absolutejs/app",
+    });
+    expect(seen.map((entry) => entry.url)).toEqual([
+      "https://api.github.com/repos/absolutejs/app/pulls",
+      "https://api.github.com/repos/absolutejs/app/pulls/9/reviews",
+    ]);
+    // The linked credential, not an installation token.
+    expect(new Set(seen.map((entry) => entry.token)).size).toBe(1);
+    expect(seen[0]?.token).not.toContain("ghs_");
+  });
+});

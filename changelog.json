@@ -5,6 +5,20 @@
 		{
 			"changes": [
 				{
+					"detail": "createGitHubAppUserClient's createPullRequest opens a pull request with the person's linked GitHub App user credential, so GitHub shows them as its author.",
+					"kind": "added",
+					"summary": "Open a pull request as the person",
+					"symbols": [
+						"createGitHubAppUserClient"
+					]
+				}
+			],
+			"date": "2026-11-11",
+			"version": "0.24.0"
+		},
+		{
+			"changes": [
+				{
 					"detail": "commentOnGitHubPullRequest posts on a pull request's conversation (as the App, with an installation token). reviewGitHubPullRequest submits APPROVE, REQUEST_CHANGES or COMMENT with whatever token it is given, and createGitHubAppUserClient's new reviewPullRequest does it as the person, with their linked credential. getGitHubPullRequestReadiness reads the review decision, merge state and every check on the latest commit, through GraphQL.",
 					"kind": "added",
 					"summary": "Review, comment on, and read the readiness of a pull request",
