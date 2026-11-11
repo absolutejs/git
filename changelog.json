@@ -5,6 +5,24 @@
 		{
 			"changes": [
 				{
+					"detail": "commentOnGitHubPullRequest posts on a pull request's conversation (as the App, with an installation token). reviewGitHubPullRequest submits APPROVE, REQUEST_CHANGES or COMMENT with whatever token it is given, and createGitHubAppUserClient's new reviewPullRequest does it as the person, with their linked credential. getGitHubPullRequestReadiness reads the review decision, merge state and every check on the latest commit, through GraphQL.",
+					"kind": "added",
+					"summary": "Review, comment on, and read the readiness of a pull request",
+					"symbols": [
+						"commentOnGitHubPullRequest",
+						"reviewGitHubPullRequest",
+						"getGitHubPullRequestReadiness",
+						"GitHubPullRequestReadiness",
+						"createGitHubAppUserClient"
+					]
+				}
+			],
+			"date": "2026-11-11",
+			"version": "0.23.0"
+		},
+		{
+			"changes": [
+				{
 					"detail": "Each entry point was bundled with its own copy of the package's shared code, so an error thrown by one entry point (GitIngestionError from @absolutejs/git/github-app, say) was never instanceof the class exported by another (@absolutejs/git). Consumers' error handling missed every such error. The build now splits shared code into one chunk.",
 					"kind": "fixed",
 					"summary": "Errors are the same class whichever entry point threw them",

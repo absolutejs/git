@@ -1072,3 +1072,144 @@ export const getGitHubRepositoryMergeSettings = async (options: {
     defaultBranch: string(payload.default_branch, "GitHub default branch"),
   };
 };
+
+/** A comment on a pull request, posted by whoever owns the token (the App,
+ *  with an installation token). */
+export const commentOnGitHubPullRequest = async (options: {
+  body: string;
+  fetch?: Fetch;
+  installationToken: string;
+  number: number;
+  repositoryFullName: string;
+}): Promise<{ id: number }> => {
+  const response = await (options.fetch ?? fetch)(
+    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/issues/${integer(options.number, "GitHub pull request number")}/comments`,
+    {
+      body: JSON.stringify({ body: string(options.body, "GitHub comment") }),
+      headers: {
+        ...githubHeaders(options.installationToken),
+        "content-type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+  const payload = object(
+    await json(response, "GitHub pull request comment"),
+    "GitHub pull request comment",
+  );
+  return { id: integer(payload.id, "GitHub comment id") };
+};
+
+/**
+ * A review submitted as the token's own user: a GitHub App user token makes
+ * it the person's review, counted by branch protection like any other.
+ * GitHub refuses an approval from the pull request's own author (422).
+ */
+export const reviewGitHubPullRequest = async (options: {
+  body?: string;
+  event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
+  fetch?: Fetch;
+  number: number;
+  repositoryFullName: string;
+  token: string;
+}): Promise<{ id: number; state: string }> => {
+  const response = await (options.fetch ?? fetch)(
+    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/pulls/${integer(options.number, "GitHub pull request number")}/reviews`,
+    {
+      body: JSON.stringify({
+        ...(options.body ? { body: options.body } : {}),
+        event: options.event,
+      }),
+      headers: {
+        ...githubHeaders(options.token),
+        "content-type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+  const payload = object(
+    await json(response, "GitHub pull request review"),
+    "GitHub pull request review",
+  );
+  return {
+    id: integer(payload.id, "GitHub review id"),
+    state: string(payload.state, "GitHub review state"),
+  };
+};
+
+/** What GitHub still requires before a pull request can merge: its review
+ *  decision under branch protection, its merge state, and each check on the
+ *  latest commit. Null fields are what GitHub didn't say. */
+export type GitHubPullRequestReadiness = {
+  checks: Array<{ name: string; state: string }>;
+  mergeState: string | null;
+  reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
+};
+
+export const getGitHubPullRequestReadiness = async (options: {
+  fetch?: Fetch;
+  installationToken: string;
+  nodeId: string;
+}): Promise<GitHubPullRequestReadiness> => {
+  const response = await (options.fetch ?? fetch)(
+    "https://api.github.com/graphql",
+    {
+      body: JSON.stringify({
+        query:
+          "query($id: ID!) { node(id: $id) { ... on PullRequest { reviewDecision mergeStateStatus commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 50) { nodes { __typename ... on CheckRun { name conclusion status } ... on StatusContext { context state } } } } } } } } } }",
+        variables: {
+          id: string(options.nodeId, "GitHub pull request node id"),
+        },
+      }),
+      headers: {
+        ...githubHeaders(options.installationToken),
+        "content-type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+  const payload = object(
+    await json(response, "GitHub pull request readiness"),
+    "GitHub pull request readiness",
+  );
+  const data = object(payload.data, "GitHub pull request readiness data");
+  const node = object(data.node, "GitHub pull request");
+  const decision = node.reviewDecision;
+  const commits = (node.commits as { nodes?: unknown[] } | null)?.nodes ?? [];
+  const last = commits[commits.length - 1] as
+    | {
+        commit?: {
+          statusCheckRollup?: { contexts?: { nodes?: unknown[] } } | null;
+        };
+      }
+    | undefined;
+  const contexts = last?.commit?.statusCheckRollup?.contexts?.nodes ?? [];
+  const checks = contexts.flatMap((entry) => {
+    const context = entry as Record<string, unknown>;
+    if (context.__typename === "CheckRun" && typeof context.name === "string")
+      return [
+        {
+          name: context.name,
+          state: String(context.conclusion ?? context.status ?? "PENDING"),
+        },
+      ];
+    if (
+      context.__typename === "StatusContext" &&
+      typeof context.context === "string"
+    )
+      return [
+        { name: context.context, state: String(context.state ?? "PENDING") },
+      ];
+    return [];
+  });
+  return {
+    checks,
+    mergeState: optionalString(node.mergeStateStatus),
+    reviewDecision:
+      decision === "APPROVED" ||
+      decision === "CHANGES_REQUESTED" ||
+      decision === "REVIEW_REQUIRED"
+        ? decision
+        : null,
+  };
+};
