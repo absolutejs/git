@@ -118,6 +118,13 @@ const integer = (value: unknown, label: string) => {
   return Number(value);
 };
 
+/** A count, where zero is a count too. */
+const count = (value: unknown, label: string) => {
+  if (!Number.isSafeInteger(value) || Number(value) < 0)
+    throw new GitIngestionError(`${label} is invalid`);
+  return Number(value);
+};
+
 const object = (value: unknown, label: string) => {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new GitIngestionError(`${label} is invalid`);
@@ -831,6 +838,52 @@ export const getGitHubPullRequest = async (options: {
     { headers: githubHeaders(options.installationToken) },
   );
   return parsePullRequest(await json(response, "GitHub pull request read"));
+};
+
+/** How far apart two commits are: `head` is `aheadBy` commits past their
+ *  merge base, and `base` is `behindBy` past it. */
+export type GitHubCommitComparison = {
+  aheadBy: number;
+  behindBy: number;
+  status: "ahead" | "behind" | "diverged" | "identical";
+};
+
+/** Compares two commits of one repository (`base...head`), without listing
+ *  the commits between them. */
+export const compareGitHubCommits = async (options: {
+  base: string;
+  fetch?: Fetch;
+  head: string;
+  installationToken: string;
+  repositoryFullName: string;
+}): Promise<GitHubCommitComparison> => {
+  for (const [label, sha] of [
+    ["base", options.base],
+    ["head", options.head],
+  ] as const)
+    if (!/^[0-9a-f]{40}$/.test(sha))
+      throw new GitIngestionError(`GitHub comparison ${label} is invalid`);
+  const response = await (options.fetch ?? fetch)(
+    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/compare/${options.base}...${options.head}?per_page=1`,
+    { headers: githubHeaders(options.installationToken) },
+  );
+  const payload = object(
+    await json(response, "GitHub comparison"),
+    "GitHub comparison",
+  );
+  const status = string(payload.status, "GitHub comparison status");
+  if (
+    status !== "ahead" &&
+    status !== "behind" &&
+    status !== "diverged" &&
+    status !== "identical"
+  )
+    throw new GitIngestionError("GitHub comparison status is invalid");
+  return {
+    aheadBy: count(payload.ahead_by, "GitHub comparison ahead_by"),
+    behindBy: count(payload.behind_by, "GitHub comparison behind_by"),
+    status,
+  };
 };
 
 export const createGitHubPullRequest = async (options: {
