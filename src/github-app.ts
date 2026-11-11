@@ -1055,6 +1055,9 @@ export type GitHubRepositoryMergeSettings = {
   allowSquashMerge: boolean | null;
   archived: boolean;
   defaultBranch: string;
+  /** Whether only people given access can see it; null when GitHub didn't
+   *  say. Branch names on a public repository are public too. */
+  private: boolean | null;
 };
 
 export const getGitHubRepositoryMergeSettings = async (options: {
@@ -1077,6 +1080,7 @@ export const getGitHubRepositoryMergeSettings = async (options: {
     allowSquashMerge: flag(payload.allow_squash_merge),
     archived: payload.archived === true,
     defaultBranch: string(payload.default_branch, "GitHub default branch"),
+    private: flag(payload.private),
   };
 };
 
