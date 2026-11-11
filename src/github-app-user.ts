@@ -6,6 +6,7 @@ import type {
 import { GitIngestionError } from "./index";
 import type { LinkedListing } from "./linked-identities";
 import {
+  createGitHubPullRequest,
   GitHubApiError,
   listGitHubAppInstallationsForUser,
   listGitHubAppRepositoriesForUser,
@@ -301,5 +302,28 @@ export const createGitHubAppUserClient = (options: {
       }),
     );
 
-  return { getRepository, listRepositories, reviewPullRequest };
+  /** Opens a pull request as the person, with their linked GitHub App user
+   *  credential, so GitHub shows them as its author. Throws
+   *  GitHubUserCredentialUnavailableError when they have none linked. */
+  const createPullRequest = (
+    ownerRef: string,
+    pullRequest: Omit<
+      Parameters<typeof createGitHubPullRequest>[0],
+      "fetch" | "installationToken"
+    >,
+  ) =>
+    withToken(ownerRef, (token) =>
+      createGitHubPullRequest({
+        ...pullRequest,
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+        installationToken: token,
+      }),
+    );
+
+  return {
+    createPullRequest,
+    getRepository,
+    listRepositories,
+    reviewPullRequest,
+  };
 };
