@@ -10,6 +10,7 @@ import {
   listGitHubAppInstallationsForUser,
   listGitHubAppRepositoriesForUser,
   type GitHubAppRepository,
+  reviewGitHubPullRequest,
 } from "./github-app";
 
 type Fetch = (
@@ -282,5 +283,23 @@ export const createGitHubAppUserClient = (options: {
         );
   };
 
-  return { getRepository, listRepositories };
+  /** Reviews a pull request as the person themselves, with their linked
+   *  GitHub App user credential: on GitHub it is their review. Throws
+   *  GitHubUserCredentialUnavailableError when they have none linked. */
+  const reviewPullRequest = (
+    ownerRef: string,
+    review: Omit<
+      Parameters<typeof reviewGitHubPullRequest>[0],
+      "fetch" | "token"
+    >,
+  ) =>
+    withToken(ownerRef, (token) =>
+      reviewGitHubPullRequest({
+        ...review,
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+        token,
+      }),
+    );
+
+  return { getRepository, listRepositories, reviewPullRequest };
 };
