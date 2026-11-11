@@ -96,6 +96,25 @@ describe("getGitHubRepositoryMergeSettings", () => {
       allowSquashMerge: false,
       archived: false,
       defaultBranch: "main",
+      private: null,
     });
+  });
+
+  test("says whether the repository is private", async () => {
+    const { fetch } = recorder([
+      { body: { archived: false, default_branch: "main", private: false } },
+      { body: { archived: false, default_branch: "main", private: true } },
+    ]);
+    const options = {
+      fetch,
+      installationToken: "token",
+      repositoryFullName: "absolutejs/app",
+    };
+    expect((await getGitHubRepositoryMergeSettings(options)).private).toBe(
+      false,
+    );
+    expect((await getGitHubRepositoryMergeSettings(options)).private).toBe(
+      true,
+    );
   });
 });

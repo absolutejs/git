@@ -748,6 +748,9 @@ export type GitHubPullRequest = {
   merged: boolean;
   /** Null while GitHub is still computing it. */
   mergeable: boolean | null;
+  /** The commit the merge made on the base branch (a squash, a merge
+   *  commit, or a rebase's last commit); null until it is merged. */
+  mergeCommitSha: string | null;
   /** GraphQL id, for what only GraphQL can do (marking ready for review). */
   nodeId: string | null;
   number: number;
@@ -771,6 +774,10 @@ const parsePullRequest = (value: unknown): GitHubPullRequest => {
     merged: payload.merged === true || typeof payload.merged_at === "string",
     mergeable:
       typeof payload.mergeable === "boolean" ? payload.mergeable : null,
+    mergeCommitSha:
+      payload.merged === true || typeof payload.merged_at === "string"
+        ? optionalString(payload.merge_commit_sha)
+        : null,
     nodeId: optionalString(payload.node_id),
     number: integer(payload.number, "GitHub pull request number"),
     state,
@@ -1048,6 +1055,9 @@ export type GitHubRepositoryMergeSettings = {
   allowSquashMerge: boolean | null;
   archived: boolean;
   defaultBranch: string;
+  /** Whether only people given access can see it; null when GitHub didn't
+   *  say. Branch names on a public repository are public too. */
+  private: boolean | null;
 };
 
 export const getGitHubRepositoryMergeSettings = async (options: {
@@ -1070,6 +1080,7 @@ export const getGitHubRepositoryMergeSettings = async (options: {
     allowSquashMerge: flag(payload.allow_squash_merge),
     archived: payload.archived === true,
     defaultBranch: string(payload.default_branch, "GitHub default branch"),
+    private: flag(payload.private),
   };
 };
 

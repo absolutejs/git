@@ -3,6 +3,7 @@ import {
   createGitHubAppInstallationToken,
   createGitHubPullRequest,
   findGitHubPullRequest,
+  getGitHubPullRequest,
   getGitHubAppInstallation,
   GitHubMergeRefusedError,
   markGitHubPullRequestReady,
@@ -222,5 +223,31 @@ describe("GitHub App writes", () => {
       title: "x",
     });
     expect(opened.nodeId).toBe("PR_kwDOAbc123");
+  });
+
+  test("a merged pull request names the commit its merge made; an open one names none", async () => {
+    const { fetch } = recorder([
+      { body: pullRequest({ merge_commit_sha: "f".repeat(40) }) },
+      {
+        body: pullRequest({
+          merge_commit_sha: "e".repeat(40),
+          merged: true,
+          merged_at: "2026-11-11T12:00:00Z",
+          state: "closed",
+        }),
+      },
+    ]);
+    const options = {
+      fetch,
+      installationToken: "ghs_write",
+      number: 7,
+      repositoryFullName: "absolutejs/app",
+    };
+    // GitHub's test merge of an open pull request is not a merge.
+    expect((await getGitHubPullRequest(options)).mergeCommitSha).toBeNull();
+    expect(await getGitHubPullRequest(options)).toMatchObject({
+      merged: true,
+      mergeCommitSha: "e".repeat(40),
+    });
   });
 });

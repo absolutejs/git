@@ -5,6 +5,30 @@
 		{
 			"changes": [
 				{
+					"detail": "GitHubRepositoryMergeSettings now carries private: whether only people given access can see the repository, null when GitHub didn't say. A public repository's branch names are public too, so PAAS shows a change's branch name before its first push to one.",
+					"kind": "added",
+					"summary": "Whether a repository is private",
+					"symbols": [
+						"GitHubRepositoryMergeSettings",
+						"getGitHubRepositoryMergeSettings"
+					]
+				},
+				{
+					"detail": "GitHubPullRequest now carries mergeCommitSha: the commit a merge made on the base branch (a squash, a merge commit, or a rebase's last commit), null until the pull request is merged. PAAS uses it to undo a merged change with a revert.",
+					"kind": "added",
+					"summary": "The merge commit of a merged pull request",
+					"symbols": [
+						"GitHubPullRequest",
+						"getGitHubPullRequest"
+					]
+				}
+			],
+			"date": "2026-11-11",
+			"version": "0.25.0"
+		},
+		{
+			"changes": [
+				{
 					"detail": "createGitHubAppUserClient's createPullRequest opens a pull request with the person's linked GitHub App user credential, so GitHub shows them as its author.",
 					"kind": "added",
 					"summary": "Open a pull request as the person",
