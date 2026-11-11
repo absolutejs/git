@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createGitHubAppInstallationToken,
+  compareGitHubCommits,
   createGitHubPullRequest,
   findGitHubPullRequest,
   getGitHubPullRequest,
@@ -249,5 +250,34 @@ describe("GitHub App writes", () => {
       merged: true,
       mergeCommitSha: "e".repeat(40),
     });
+  });
+
+  test("compares two commits without listing them", async () => {
+    const { fetch, seen } = recorder([
+      { body: { ahead_by: 12, behind_by: 0, status: "ahead", commits: [] } },
+    ]);
+    const base = "a".repeat(40);
+    const head = "b".repeat(40);
+    expect(
+      await compareGitHubCommits({
+        base,
+        fetch,
+        head,
+        installationToken: "ghs_read",
+        repositoryFullName: "absolutejs/app",
+      }),
+    ).toEqual({ aheadBy: 12, behindBy: 0, status: "ahead" });
+    expect(seen[0]?.url).toBe(
+      `https://api.github.com/repos/absolutejs/app/compare/${base}...${head}?per_page=1`,
+    );
+    await expect(
+      compareGitHubCommits({
+        base: "main",
+        fetch,
+        head,
+        installationToken: "t",
+        repositoryFullName: "absolutejs/app",
+      }),
+    ).rejects.toThrow("GitHub comparison base is invalid");
   });
 });
