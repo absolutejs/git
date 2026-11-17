@@ -12,27 +12,24 @@ import path from "node:path";
  */
 const dist = path.join(import.meta.dir, "..", "dist");
 
-describe.if(existsSync(path.join(dist, "index.js")))(
-  "built entry points",
-  () => {
-    test("share one GitIngestionError", async () => {
-      const root = await import(path.join(dist, "index.js"));
-      const app = await import(path.join(dist, "github-app.js"));
-      let thrown: unknown;
-      try {
-        app.verifyGitHubAppPushWebhook({
-          body: "{}",
-          headers: new Headers({
-            "x-github-delivery": "d",
-            "x-github-event": "push",
-            "x-hub-signature-256": "sha256=00",
-          }),
-          secret: "a-secret-long-enough",
-        });
-      } catch (error) {
-        thrown = error;
-      }
-      expect(thrown).toBeInstanceOf(root.GitIngestionError);
-    });
-  },
-);
+describe.if(existsSync(path.join(dist, "index.js")))("built entry points", () => {
+  test("share one GitIngestionError", async () => {
+    const root = await import(path.join(dist, "index.js"));
+    const app = await import(path.join(dist, "github-app.js"));
+    let thrown: unknown;
+    try {
+      app.verifyGitHubAppPushWebhook({
+        body: "{}",
+        headers: new Headers({
+          "x-github-delivery": "d",
+          "x-github-event": "push",
+          "x-hub-signature-256": "sha256=00",
+        }),
+        secret: "a-secret-long-enough",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(root.GitIngestionError);
+  });
+});
