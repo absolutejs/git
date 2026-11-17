@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   createGitHubAppInstallationToken,
   compareGitHubCommits,
+  createGitHubRepository,
+  GitHubRepositoryExistsError,
   createGitHubPullRequest,
   findGitHubPullRequest,
   getGitHubPullRequest,
@@ -279,5 +281,94 @@ describe("GitHub App writes", () => {
         repositoryFullName: "absolutejs/app",
       }),
     ).rejects.toThrow("GitHub comparison base is invalid");
+  });
+});
+
+describe("createGitHubRepository", () => {
+  const created = {
+    clone_url: "https://github.com/absolutejs/shop.git",
+    default_branch: "main",
+    full_name: "absolutejs/shop",
+    html_url: "https://github.com/absolutejs/shop",
+    id: 501,
+    private: true,
+  };
+
+  test("creates an empty private repository under an organization", async () => {
+    const { fetch, seen } = recorder([{ body: created, status: 201 }]);
+    const repository = await createGitHubRepository({
+      fetch,
+      name: "shop",
+      owner: { kind: "organization", login: "absolutejs" },
+      private: true,
+      userAccessToken: "ghu_token",
+    });
+    expect(seen[0]?.url).toBe("https://api.github.com/orgs/absolutejs/repos");
+    expect(seen[0]?.method).toBe("POST");
+    expect(seen[0]?.body).toEqual({
+      auto_init: false,
+      name: "shop",
+      private: true,
+    });
+    expect(repository).toEqual({
+      cloneUrl: created.clone_url,
+      defaultBranch: "main",
+      fullName: "absolutejs/shop",
+      id: 501,
+      private: true,
+      webUrl: created.html_url,
+    });
+  });
+
+  test("creates under the person's own account", async () => {
+    const { fetch, seen } = recorder([{ body: created, status: 201 }]);
+    await createGitHubRepository({
+      fetch,
+      name: "shop",
+      owner: { kind: "user", login: "alexkahndev" },
+      private: false,
+      userAccessToken: "ghu_token",
+    });
+    expect(seen[0]?.url).toBe("https://api.github.com/user/repos");
+  });
+
+  test("a taken name is its own error, naming the repository", async () => {
+    const { fetch } = recorder([{ body: { message: "exists" }, status: 422 }]);
+    const attempt = createGitHubRepository({
+      fetch,
+      name: "shop",
+      owner: { kind: "user", login: "alexkahndev" },
+      private: true,
+      userAccessToken: "ghu_token",
+    });
+    await expect(attempt).rejects.toBeInstanceOf(GitHubRepositoryExistsError);
+  });
+
+  test("refuses a name GitHub would refuse, before asking", async () => {
+    const { fetch, seen } = recorder([]);
+    for (const name of ["", "..", "has space", "a/b", "x".repeat(101)])
+      await expect(
+        createGitHubRepository({
+          fetch,
+          name,
+          owner: { kind: "user", login: "alexkahndev" },
+          private: true,
+          userAccessToken: "ghu_token",
+        }),
+      ).rejects.toThrow();
+    expect(seen).toHaveLength(0);
+  });
+
+  test("without the permission, GitHub's refusal comes through", async () => {
+    const { fetch } = recorder([{ body: {}, status: 403 }]);
+    await expect(
+      createGitHubRepository({
+        fetch,
+        name: "shop",
+        owner: { kind: "organization", login: "absolutejs" },
+        private: true,
+        userAccessToken: "ghu_token",
+      }),
+    ).rejects.toThrow("403");
   });
 });
