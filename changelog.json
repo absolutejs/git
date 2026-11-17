@@ -5,6 +5,22 @@
 		{
 			"changes": [
 				{
+					"detail": "createGitHubRepository makes an empty repository as the person, with their GitHub App user token, under their own account or an organization the App is installed on. A taken name throws GitHubRepositoryExistsError; a name GitHub would refuse is refused before asking. It needs the App's Administration (write) permission. PAAS uses it so a project can start a repository without leaving the portal.",
+					"kind": "added",
+					"summary": "Create a repository",
+					"symbols": [
+						"createGitHubRepository",
+						"GitHubRepositoryExistsError",
+						"GitHubRepositoryOwner"
+					]
+				}
+			],
+			"date": "2026-11-17",
+			"version": "0.27.0"
+		},
+		{
+			"changes": [
+				{
 					"detail": "compareGitHubCommits says how far apart two commits of a repository are (aheadBy, behindBy and GitHub's status), without listing the commits between them. PAAS uses it to say how far a change has fallen behind the live version.",
 					"kind": "added",
 					"summary": "Compare two commits",

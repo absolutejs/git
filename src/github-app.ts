@@ -604,6 +604,91 @@ export const listGitHubAppRepositoriesForUser = async (options: {
   });
 };
 
+/** Where a new repository is made: the person's own account, or an
+ *  organization the GitHub App is installed on. */
+export type GitHubRepositoryOwner = {
+  kind: "organization" | "user";
+  login: string;
+};
+
+/** A repository name GitHub accepts: letters, digits, `.`, `-` and `_`, at
+ *  most 100 characters, and not `.` or `..`. */
+const repositoryName = (value: string) => {
+  const name = value.trim();
+  if (!/^[A-Za-z0-9._-]{1,100}$/.test(name) || name === "." || name === "..")
+    throw new GitIngestionError(
+      "A repository name can use letters, numbers, '.', '-' and '_' (up to 100)",
+    );
+  return name;
+};
+
+/** Thrown when the name is already taken under that owner (GitHub's 422). */
+export class GitHubRepositoryExistsError extends GitIngestionError {
+  readonly owner: string;
+  readonly repository: string;
+
+  constructor(owner: string, repository: string) {
+    super(`${owner}/${repository} already exists on GitHub`);
+    this.name = "GitHubRepositoryExistsError";
+    this.owner = owner;
+    this.repository = repository;
+  }
+}
+
+/**
+ * Creates an empty repository as the person, with their GitHub App user
+ * token: under their own account, or under an organization the App is
+ * installed on. Empty means no README or first commit, so the caller's
+ * first push is the repository's whole history. Needs the App's
+ * Administration (write) repository permission; GitHub answers 403
+ * without it.
+ */
+export const createGitHubRepository = async (options: {
+  description?: string;
+  fetch?: Fetch;
+  name: string;
+  owner: GitHubRepositoryOwner;
+  private: boolean;
+  userAccessToken: string;
+}): Promise<GitHubAppRepository> => {
+  const name = repositoryName(options.name);
+  const login = options.owner.login;
+  if (!/^[A-Za-z0-9-]{1,39}$/.test(login))
+    throw new GitIngestionError("GitHub owner is invalid");
+  const url =
+    options.owner.kind === "organization"
+      ? `https://api.github.com/orgs/${encodeURIComponent(login)}/repos`
+      : "https://api.github.com/user/repos";
+  const response = await (options.fetch ?? fetch)(url, {
+    body: JSON.stringify({
+      auto_init: false,
+      ...(options.description ? { description: options.description } : {}),
+      name,
+      private: options.private,
+    }),
+    headers: {
+      ...githubHeaders(options.userAccessToken),
+      "content-type": "application/json",
+    },
+    method: "POST",
+  });
+  if (response.status === 422)
+    throw new GitHubRepositoryExistsError(login, name);
+  const repository = object(
+    await json(response, "GitHub repository creation"),
+    "GitHub repository",
+  );
+  return {
+    cloneUrl: string(repository.clone_url, "GitHub repository clone URL"),
+    // An empty repository still names the branch its first push creates.
+    defaultBranch: optionalString(repository.default_branch) ?? "main",
+    fullName: string(repository.full_name, "GitHub repository full name"),
+    id: integer(repository.id, "GitHub repository id"),
+    private: repository.private === true,
+    webUrl: string(repository.html_url, "GitHub repository web URL"),
+  };
+};
+
 export const verifyGitHubAppPushWebhook = (options: {
   body: string | Uint8Array;
   headers: HeaderSource;
