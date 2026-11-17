@@ -329,3 +329,101 @@ describe("acting as the person", () => {
     expect(seen[0]?.token).not.toContain("ghs_");
   });
 });
+
+describe("createRepository", () => {
+  /* GitHub as the person "octocat" sees it: one installation on the
+   * absolutejs organization (selected repositories), and on POST a new
+   * repository that the installation lists only when `listed` is set. */
+  const creationFetch =
+    (options: { listed: boolean; seen: string[] }) =>
+    async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      options.seen.push(`${init?.method ?? "GET"} ${url}`);
+      if (url === "https://api.github.com/user")
+        return Response.json({ email: null, id: 9, login: "octocat", name: null });
+      if (url.includes("/orgs/absolutejs/repos") && init?.method === "POST")
+        return Response.json(
+          {
+            clone_url: "https://github.com/absolutejs/shop.git",
+            default_branch: "main",
+            full_name: "absolutejs/shop",
+            html_url: "https://github.com/absolutejs/shop",
+            id: 501,
+            private: true,
+          },
+          { status: 201 },
+        );
+      if (url.includes("/user/installations/11/repositories?"))
+        return Response.json({
+          repositories: options.listed
+            ? [
+                {
+                  clone_url: "https://github.com/absolutejs/shop.git",
+                  default_branch: "main",
+                  full_name: "absolutejs/shop",
+                  html_url: "https://github.com/absolutejs/shop",
+                  id: 501,
+                  private: true,
+                },
+              ]
+            : [],
+        });
+
+      return githubFetch(input);
+    };
+
+  test("creates under the organization the installation belongs to", async () => {
+    const seen: string[] = [];
+    const client = createGitHubAppUserClient({
+      credentials: resolver(),
+      fetch: creationFetch({ listed: true, seen }),
+    });
+    const created = await client.createRepository("user-1", {
+      installationId: 11,
+      name: "shop",
+      private: true,
+    });
+    expect(seen).toContain("POST https://api.github.com/orgs/absolutejs/repos");
+    expect(created.accessible).toBe(true);
+    expect(created.repository).toMatchObject({
+      account: { login: "absolutejs" },
+      fullName: "absolutejs/shop",
+      id: 501,
+      installationId: 11,
+      linkedAccountId: "octocat",
+      repositorySelection: "selected",
+    });
+  });
+
+  test("says when a selected-repositories installation cannot see it yet", async () => {
+    const client = createGitHubAppUserClient({
+      credentials: resolver(),
+      fetch: creationFetch({ listed: false, seen: [] }),
+    });
+    const created = await client.createRepository("user-1", {
+      installationId: 11,
+      name: "shop",
+      private: true,
+    });
+    expect(created.accessible).toBe(false);
+    expect(created.repository.installationUrl).toBe(
+      "https://github.com/settings/installations/11",
+    );
+  });
+
+  test("an installation this identity cannot reach is refused before creating", async () => {
+    const seen: string[] = [];
+    const client = createGitHubAppUserClient({
+      credentials: resolver(),
+      fetch: creationFetch({ listed: true, seen }),
+    });
+    await expect(
+      client.createRepository("user-1", {
+        installationId: 999,
+        name: "shop",
+        private: true,
+      }),
+    ).rejects.toThrow("not reachable");
+    expect(seen.some((entry) => entry.startsWith("POST"))).toBe(false);
+  });
+});
