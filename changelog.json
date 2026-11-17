@@ -5,6 +5,20 @@
 		{
 			"changes": [
 				{
+					"detail": "The GitHub App user client gains createRepository: it creates an empty repository with the identity that reached the chosen installation (so with two GitHub accounts linked it lands where it was asked for), as a personal repository under that identity's own account or an organization's otherwise, and says whether the installation can already see it. An installation limited to selected repositories may not; its installationUrl is where to add it.",
+					"kind": "added",
+					"summary": "Create a repository as the person",
+					"symbols": [
+						"createGitHubAppUserClient"
+					]
+				}
+			],
+			"date": "2026-11-17",
+			"version": "0.28.0"
+		},
+		{
+			"changes": [
+				{
 					"detail": "createGitHubRepository makes an empty repository as the person, with their GitHub App user token, under their own account or an organization the App is installed on. A taken name throws GitHubRepositoryExistsError; a name GitHub would refuse is refused before asking. It needs the App's Administration (write) permission. PAAS uses it so a project can start a repository without leaving the portal.",
 					"kind": "added",
 					"summary": "Create a repository",

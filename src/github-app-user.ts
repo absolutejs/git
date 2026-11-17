@@ -7,6 +7,8 @@ import { GitIngestionError } from "./index";
 import type { LinkedListing } from "./linked-identities";
 import {
   createGitHubPullRequest,
+  createGitHubRepository,
+  getGitHubUser,
   GitHubApiError,
   listGitHubAppInstallationsForUser,
   listGitHubAppRepositoriesForUser,
@@ -320,8 +322,87 @@ export const createGitHubAppUserClient = (options: {
       }),
     );
 
+  /**
+   * Creates an empty repository as the person and says whether the App can
+   * already reach it. The identity is the one that reached `installationId`
+   * (`externalAccountId`, a repository listing's `linkedAccountId`), so with
+   * two GitHub accounts linked the repository lands where it was asked for.
+   * Under that identity's own account it is a personal repository; under any
+   * other account the installation belongs to, an organization's. An
+   * installation limited to selected repositories may not include it yet:
+   * `accessible` is false then, and `installationUrl` is where to add it.
+   */
+  const createRepository = async (
+    ownerRef: string,
+    input: {
+      externalAccountId?: string;
+      installationId: number;
+      name: string;
+      private: boolean;
+    },
+  ): Promise<{ accessible: boolean; repository: GitHubAppUserRepository }> => {
+    const bindings = await githubBindings(ownerRef);
+    const binding = input.externalAccountId
+      ? bindings.find(
+          (entry) => entry.externalAccountId === input.externalAccountId,
+        )
+      : undefined;
+    const fetchOption = options.fetch ? { fetch: options.fetch } : {};
+
+    return withToken(
+      ownerRef,
+      async (userAccessToken, credential) => {
+        const installations = await listGitHubAppInstallationsForUser({
+          ...fetchOption,
+          userAccessToken,
+        });
+        const installation = installations.find(
+          (entry) => entry.id === input.installationId,
+        );
+        if (!installation)
+          throw new GitIngestionError(
+            "That GitHub account is not reachable through this identity",
+          );
+        const user = await getGitHubUser({ ...fetchOption, userAccessToken });
+        const created = await createGitHubRepository({
+          ...fetchOption,
+          name: input.name,
+          owner: {
+            kind:
+              user.login.toLowerCase() ===
+              installation.account.login.toLowerCase()
+                ? "user"
+                : "organization",
+            login: installation.account.login,
+          },
+          private: input.private,
+          userAccessToken,
+        });
+        const visible = await listGitHubAppRepositoriesForUser({
+          ...fetchOption,
+          installationId: installation.id,
+          userAccessToken,
+        });
+
+        return {
+          accessible: visible.some((entry) => entry.id === created.id),
+          repository: {
+            ...created,
+            account: installation.account,
+            installationId: installation.id,
+            installationUrl: installation.installationUrl,
+            linkedAccountId: credential.externalAccountId,
+            repositorySelection: installation.repositorySelection,
+          },
+        };
+      },
+      binding?.id,
+    );
+  };
+
   return {
     createPullRequest,
+    createRepository,
     getRepository,
     listRepositories,
     reviewPullRequest,
