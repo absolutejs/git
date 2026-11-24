@@ -761,6 +761,54 @@ export const verifyGitHubAppCheckSuiteWebhook = (options: {
   };
 };
 
+/** Someone pressed "Re-run" on one of the App's check runs (`check_run`)
+ *  or "Re-run all checks" on its suite (`check_suite`), both with the action
+ *  `rerequested`. GitHub sends it only to the App that created the checks;
+ *  the commit is what to run again. */
+export const verifyGitHubAppCheckRerunWebhook = (options: {
+  body: string | Uint8Array;
+  headers: HeaderSource;
+  now?: () => Date;
+  secret: string;
+}): {
+  checkName: string | null;
+  deliveryId: string;
+  headSha: string;
+  installationId: number;
+  receivedAt: string;
+  repositoryFullName: string;
+  repositoryId: number;
+} => {
+  const { deliveryId, event, payload, receivedAt } =
+    verifyGitHubWebhookEnvelope(options, ["check_run", "check_suite"]);
+  if (string(payload.action, `GitHub ${event} action`) !== "rerequested")
+    throw new GitIngestionError(`GitHub ${event} action is unsupported`);
+  const installation = object(payload.installation, "GitHub App installation");
+  const repository = object(payload.repository, "GitHub repository");
+  const check = object(
+    event === "check_run" ? payload.check_run : payload.check_suite,
+    `GitHub ${event === "check_run" ? "check run" : "check suite"}`,
+  );
+  const headSha = string(check.head_sha, "GitHub check sha").toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(headSha))
+    throw new GitIngestionError("GitHub check sha is invalid");
+  return {
+    checkName:
+      event === "check_run"
+        ? string(check.name, "GitHub check run name")
+        : null,
+    deliveryId,
+    headSha,
+    installationId: integer(installation.id, "GitHub installation id"),
+    receivedAt,
+    repositoryFullName: string(
+      repository.full_name,
+      "GitHub repository full name",
+    ),
+    repositoryId: integer(repository.id, "GitHub repository id"),
+  };
+};
+
 export const verifyGitHubAppPullRequestWebhook = (options: {
   body: string | Uint8Array;
   headers: HeaderSource;
