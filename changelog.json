@@ -5,6 +5,28 @@
 		{
 			"changes": [
 				{
+					"detail": "Verifies a `check_run` or `check_suite` webhook whose action is `rerequested` (someone pressed \"Re-run\" on one of the App's checks, or \"Re-run all checks\") and returns the commit, installation, repository and, for a single run, the check's name.",
+					"kind": "added",
+					"summary": "Verify a GitHub check re-run request",
+					"symbols": [
+						"verifyGitHubAppCheckRerunWebhook"
+					]
+				},
+				{
+					"detail": "`verifyGitHubWebhookEnvelope` also takes a list of event names the caller reads alike, and returns the one the delivery is as `event`. A single name works as before.",
+					"kind": "changed",
+					"summary": "A webhook envelope can accept several events",
+					"symbols": [
+						"verifyGitHubWebhookEnvelope"
+					]
+				}
+			],
+			"date": "2026-11-24",
+			"version": "0.29.0"
+		},
+		{
+			"changes": [
+				{
 					"detail": "The GitHub App user client gains createRepository: it creates an empty repository with the identity that reached the chosen installation (so with two GitHub accounts linked it lands where it was asked for), as a personal repository under that identity's own account or an organization's otherwise, and says whether the installation can already see it. An installation limited to selected repositories may not; its installationUrl is where to add it.",
 					"kind": "added",
 					"summary": "Create a repository as the person",

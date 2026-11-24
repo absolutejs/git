@@ -56,14 +56,20 @@ const string = (value: unknown, label: string) => {
   return value;
 };
 
+/** `eventName` may list several events the caller reads alike; the one the
+ *  delivery is comes back as `event`. */
 export const verifyGitHubWebhookEnvelope = (
   options: GitHubWebhookOptions,
-  eventName: string,
+  eventName: string | readonly string[],
 ) => {
   if (options.secret.length < 16)
     throw new GitIngestionError("GitHub webhook secret is too short");
-  if (header(options.headers, "x-github-event") !== eventName)
-    throw new GitIngestionError(`GitHub webhook is not a ${eventName} event`);
+  const accepted = typeof eventName === "string" ? [eventName] : eventName;
+  const event = header(options.headers, "x-github-event");
+  if (event === null || !accepted.includes(event))
+    throw new GitIngestionError(
+      `GitHub webhook is not a ${accepted.join(" or ")} event`,
+    );
   const deliveryId = header(options.headers, "x-github-delivery");
   if (!deliveryId)
     throw new GitIngestionError("GitHub webhook delivery id is missing");
@@ -81,7 +87,8 @@ export const verifyGitHubWebhookEnvelope = (
 
   return {
     deliveryId,
-    payload: object(payload, `GitHub ${eventName} payload`),
+    event,
+    payload: object(payload, `GitHub ${event} payload`),
     receivedAt: (options.now ?? (() => new Date()))().toISOString(),
   };
 };

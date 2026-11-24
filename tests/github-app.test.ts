@@ -11,6 +11,7 @@ import {
   listGitHubAppRepositories,
   listGitHubAppRepositoriesForUser,
   updateGitHubCheckRun,
+  verifyGitHubAppCheckRerunWebhook,
   verifyGitHubAppCheckSuiteWebhook,
   verifyGitHubAppPullRequestWebhook,
   verifyGitHubAppPushWebhook,
@@ -433,6 +434,77 @@ describe("commit checks as a deploy gate", () => {
         secret,
       }),
     ).toThrow("action is unsupported");
+  });
+
+  test("reads a re-run of one check run or of the whole suite", () => {
+    const secret = "a-secure-webhook-secret";
+    const run = JSON.stringify({
+      action: "rerequested",
+      check_run: { head_sha: sha.toUpperCase(), name: "AbsoluteJS security" },
+      installation: { id: 3 },
+      repository: { full_name: "alexkahndev/closer-arcade", id: 4 },
+    });
+    expect(
+      verifyGitHubAppCheckRerunWebhook({
+        body: run,
+        headers: signed(run, secret, "check_run"),
+        now: () => new Date("2026-10-25T12:00:00.000Z"),
+        secret,
+      }),
+    ).toEqual({
+      checkName: "AbsoluteJS security",
+      deliveryId: "suite-delivery",
+      headSha: sha,
+      installationId: 3,
+      receivedAt: "2026-10-25T12:00:00.000Z",
+      repositoryFullName: "alexkahndev/closer-arcade",
+      repositoryId: 4,
+    });
+    const suite = JSON.stringify({
+      action: "rerequested",
+      check_suite: { head_sha: sha },
+      installation: { id: 3 },
+      repository: { full_name: "alexkahndev/closer-arcade", id: 4 },
+    });
+    expect(
+      verifyGitHubAppCheckRerunWebhook({
+        body: suite,
+        headers: signed(suite, secret, "check_suite"),
+        secret,
+      }),
+    ).toMatchObject({ checkName: null, headSha: sha });
+  });
+
+  test("refuses a forged re-run, another action, or another event", () => {
+    const secret = "a-secure-webhook-secret";
+    const run = JSON.stringify({
+      action: "rerequested",
+      check_run: { head_sha: sha, name: "AbsoluteJS deploy" },
+      installation: { id: 3 },
+      repository: { full_name: "alexkahndev/closer-arcade", id: 4 },
+    });
+    expect(() =>
+      verifyGitHubAppCheckRerunWebhook({
+        body: run,
+        headers: signed(run, "a-different-webhook-secret", "check_run"),
+        secret,
+      }),
+    ).toThrow("signature is invalid");
+    const created = JSON.stringify({ action: "created" });
+    expect(() =>
+      verifyGitHubAppCheckRerunWebhook({
+        body: created,
+        headers: signed(created, secret, "check_run"),
+        secret,
+      }),
+    ).toThrow("action is unsupported");
+    expect(() =>
+      verifyGitHubAppCheckRerunWebhook({
+        body: run,
+        headers: signed(run, secret, "push"),
+        secret,
+      }),
+    ).toThrow("not a check_run or check_suite event");
   });
 
   test("lists every page of a commit's latest check runs", async () => {
