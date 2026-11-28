@@ -254,9 +254,27 @@ describe("GitHub App writes", () => {
     });
   });
 
-  test("compares two commits without listing them", async () => {
+  test("compares two commits, with who made them", async () => {
+    const account = (login: string) => ({
+      avatar_url: `https://avatars.githubusercontent.com/${login}`,
+      html_url: `https://github.com/${login}`,
+      login,
+    });
     const { fetch, seen } = recorder([
-      { body: { ahead_by: 12, behind_by: 0, status: "ahead", commits: [] } },
+      {
+        body: {
+          ahead_by: 12,
+          behind_by: 0,
+          status: "ahead",
+          // Oldest first, as GitHub lists them.
+          commits: [
+            { author: account("dana"), commit: { author: { name: "Dana" } } },
+            { author: null, commit: { author: { name: "Build Bot" } } },
+            { author: account("sam"), commit: { author: { name: "Sam" } } },
+            { author: account("dana"), commit: { author: { name: "Dana" } } },
+          ],
+        },
+      },
     ]);
     const base = "a".repeat(40);
     const head = "b".repeat(40);
@@ -268,9 +286,28 @@ describe("GitHub App writes", () => {
         installationToken: "ghs_read",
         repositoryFullName: "absolutejs/app",
       }),
-    ).toEqual({ aheadBy: 12, behindBy: 0, status: "ahead" });
+    ).toEqual({
+      aheadBy: 12,
+      authors: [
+        {
+          avatarUrl: "https://avatars.githubusercontent.com/dana",
+          login: "dana",
+          name: "dana",
+          profileUrl: "https://github.com/dana",
+        },
+        {
+          avatarUrl: "https://avatars.githubusercontent.com/sam",
+          login: "sam",
+          name: "sam",
+          profileUrl: "https://github.com/sam",
+        },
+        { avatarUrl: null, login: null, name: "Build Bot", profileUrl: null },
+      ],
+      behindBy: 0,
+      status: "ahead",
+    });
     expect(seen[0]?.url).toBe(
-      `https://api.github.com/repos/absolutejs/app/compare/${base}...${head}?per_page=1`,
+      `https://api.github.com/repos/absolutejs/app/compare/${base}...${head}?per_page=100`,
     );
     await expect(
       compareGitHubCommits({

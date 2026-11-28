@@ -977,12 +977,53 @@ export const getGitHubPullRequest = async (options: {
  *  merge base, and `base` is `behindBy` past it. */
 export type GitHubCommitComparison = {
   aheadBy: number;
+  /** Who made the commits `head` has past `base`, newest first. */
+  authors: GitHubCommitAuthor[];
   behindBy: number;
   status: "ahead" | "behind" | "diverged" | "identical";
 };
 
-/** Compares two commits of one repository (`base...head`), without listing
- *  the commits between them. */
+/** Who made commits: the GitHub account a commit's email belongs to, or
+ *  only the name written in the commit when no account claims it. */
+export type GitHubCommitAuthor = {
+  avatarUrl: string | null;
+  login: string | null;
+  name: string;
+  profileUrl: string | null;
+};
+
+/* Up to this many commits are read for their authors (GitHub's page size). */
+const COMPARE_PAGE = 100;
+
+/* Each author once, the one with the newest commit first. */
+const commitAuthors = (commits: unknown): GitHubCommitAuthor[] => {
+  const authors = new Map<string, GitHubCommitAuthor>();
+  for (const commit of Array.isArray(commits) ? [...commits].reverse() : []) {
+    if (!commit || typeof commit !== "object") continue;
+    const { author, commit: details } = commit as Record<string, unknown>;
+    const account =
+      author && typeof author === "object"
+        ? (author as Record<string, unknown>)
+        : {};
+    const written =
+      details && typeof details === "object"
+        ? ((details as { author?: Record<string, unknown> }).author ?? {})
+        : {};
+    const login = optionalString(account.login);
+    const name = login ?? optionalString(written.name);
+    if (!name || authors.has(login ? `@${login}` : name)) continue;
+    authors.set(login ? `@${login}` : name, {
+      avatarUrl: optionalString(account.avatar_url),
+      login,
+      name,
+      profileUrl: optionalString(account.html_url),
+    });
+  }
+  return [...authors.values()];
+};
+
+/** Compares two commits of one repository (`base...head`): how far apart
+ *  they are, and who made the commits `head` has (the newest hundred). */
 export const compareGitHubCommits = async (options: {
   base: string;
   fetch?: Fetch;
@@ -997,7 +1038,7 @@ export const compareGitHubCommits = async (options: {
     if (!/^[0-9a-f]{40}$/.test(sha))
       throw new GitIngestionError(`GitHub comparison ${label} is invalid`);
   const response = await (options.fetch ?? fetch)(
-    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/compare/${options.base}...${options.head}?per_page=1`,
+    `https://api.github.com/repos/${repositoryPath(options.repositoryFullName)}/compare/${options.base}...${options.head}?per_page=${COMPARE_PAGE}`,
     { headers: githubHeaders(options.installationToken) },
   );
   const payload = object(
@@ -1014,6 +1055,7 @@ export const compareGitHubCommits = async (options: {
     throw new GitIngestionError("GitHub comparison status is invalid");
   return {
     aheadBy: count(payload.ahead_by, "GitHub comparison ahead_by"),
+    authors: commitAuthors(payload.commits),
     behindBy: count(payload.behind_by, "GitHub comparison behind_by"),
     status,
   };
