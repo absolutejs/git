@@ -5,6 +5,22 @@
 		{
 			"changes": [
 				{
+					"detail": "`compareGitHubCommits` also returns `authors`: each person who made a commit `head` has past `base` (the newest hundred), newest first and once each, as their GitHub account (login, profile and avatar), or by the name written in the commit when no account claims its email.",
+					"kind": "added",
+					"summary": "A comparison says who made the commits",
+					"symbols": [
+						"compareGitHubCommits",
+						"GitHubCommitAuthor",
+						"GitHubCommitComparison"
+					]
+				}
+			],
+			"date": "2026-11-28",
+			"version": "0.30.0"
+		},
+		{
+			"changes": [
+				{
 					"detail": "Verifies a `check_run` or `check_suite` webhook whose action is `rerequested` (someone pressed \"Re-run\" on one of the App's checks, or \"Re-run all checks\") and returns the commit, installation, repository and, for a single run, the check's name.",
 					"kind": "added",
 					"summary": "Verify a GitHub check re-run request",
